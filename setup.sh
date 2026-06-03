@@ -95,10 +95,14 @@ Type=simple
 User=${SERVICE_USER}
 WorkingDirectory=${INSTALL_DIR}
 EnvironmentFile=${INSTALL_DIR}/.env
-# xvfb-run levanta un display virtual (Xvfb) por proceso así Chromium
-# tiene un contexto WebGL real via Mesa software rendering. El screen
-# es 1080x1920x24 — igual al output que renderizamos.
-ExecStart=/usr/bin/xvfb-run --server-args="-screen 0 1080x1920x24 -ac +extension GLX +render -noreset" /usr/bin/node ${INSTALL_DIR}/dist/index.js
+# Limpiar locks de Xvfb huérfanos del run anterior antes de arrancar.
+# Sin esto, si Chromium crashea y deja /tmp/.X99-lock, el siguiente
+# xvfb-run intenta usar el mismo display, conflicto, y Chromium se
+# queja con "Missing X server or $DISPLAY".
+ExecStartPre=/bin/sh -c 'rm -f /tmp/.X*-lock 2>/dev/null; rm -rf /tmp/.X11-unix/X* 2>/dev/null; rm -rf /tmp/xvfb-run.* 2>/dev/null; true'
+# xvfb-run -a (--auto-servernum) busca un display libre dinámicamente
+# en cada arranque, evitando colisiones con state stale en /tmp.
+ExecStart=/usr/bin/xvfb-run -a --server-args="-screen 0 1080x1920x24 -ac +extension GLX +render -noreset" /usr/bin/node ${INSTALL_DIR}/dist/index.js
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
