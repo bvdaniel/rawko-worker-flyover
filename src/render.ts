@@ -77,6 +77,7 @@ async function captureFrames(page: Page, framesDir: string): Promise<number> {
   console.log(`[render] capturing ${totalFrames} frames…`)
   const t0 = Date.now()
 
+  let lastSuccessfulFrame = -1
   for (let f = 0; f < totalFrames; f++) {
     // Renderizar el frame en la página y esperar a que se aplique.
     await page.evaluate((frame: number) => {
@@ -84,12 +85,49 @@ async function captureFrames(page: Page, framesDir: string): Promise<number> {
     }, f)
 
     const filePath = path.join(framesDir, `frame-${f.toString().padStart(5, '0')}.jpg`)
-    await page.screenshot({
-      path: filePath as `${string}.jpg`,
-      type: 'jpeg',
-      quality: 88,
-      omitBackground: false,
-    })
+
+    // Retry una vez si la screenshot falla por timeout. Software WebGL
+    // a veces tiene picos de latencia en frames que requieren cargar
+    // tiles nuevos y un single timeout no debería matar todo el render.
+    let attempts = 0
+    while (true) {
+      try {
+        await page.screenshot({
+          path: filePath as `${string}.jpg`,
+          type: 'jpeg',
+          quality: 88,
+          omitBackground: false,
+        })
+        break
+      } catch (err: any) {
+        attempts++
+        if (attempts >= 2) {
+          // Si ya capturamos al menos 80% de los frames, cortamos
+          // graceful: encodeamos el video con los frames disponibles
+          // en lugar de fallar el job completo. Las screenshots fallan
+          // típicamente cerca del final por degradación de SwiftShader.
+          const ratio = lastSuccessfulFrame >= 0 ? (lastSuccessfulFrame + 1) / totalFrames : 0
+          if (ratio >= 0.8) {
+            console.warn(
+              `[render] screenshot frame ${f} failed after ${attempts} attempts, ` +
+              `but ${lastSuccessfulFrame + 1}/${totalFrames} frames (${(ratio * 100).toFixed(0)}%) ` +
+              `already captured — proceeding with partial render`,
+            )
+            return lastSuccessfulFrame + 1
+          }
+          console.error(
+            `[render] screenshot frame ${f} failed after ${attempts} attempts ` +
+            `(last successful frame: ${lastSuccessfulFrame}): ${err?.message || err}`,
+          )
+          throw err
+        }
+        console.warn(
+          `[render] screenshot frame ${f} timed out, retrying (attempt ${attempts + 1}/2)`,
+        )
+        await new Promise(r => setTimeout(r, 1_000))
+      }
+    }
+    lastSuccessfulFrame = f
 
     if (f > 0 && f % 100 === 0) {
       const elapsed = (Date.now() - t0) / 1000
@@ -156,6 +194,11 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
     // forzan software rendering (no hay GPU en el droplet).
     browser = await puppeteer.launch({
       headless: false,
+      // 5 min por CDP call. Default es 180s y con software WebGL en
+      // un droplet de 1 GB de RAM, frames individuales pueden tomar
+      // muchos segundos cuando MapLibre re-renderea regiones nuevas
+      // del terrain. Sin esto, una sola screenshot lenta rompe todo.
+      protocolTimeout: 300_000,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
