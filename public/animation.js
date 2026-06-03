@@ -160,14 +160,9 @@
     await new Promise(resolve => setTimeout(resolve, 600))
 
     console.log('[anim] ready')
-    window.__flyoverReady = true
-
-    // Mostrar intro.
     document.getElementById('title').classList.add('visible')
 
     // Estado del loop.
-    let frame = 0
-    const startTime = performance.now()
     const wpShown = new Set()
     let wpHideAt = -1
 
@@ -254,20 +249,21 @@
       ctx.stroke()
     }
 
-    function tick(now) {
-      const elapsed = (now - startTime) / 1000
-      const targetFrame = Math.floor(elapsed * FPS)
-      while (frame < targetFrame && frame < TOTAL_FRAMES) {
-        renderFrame(frame)
-        frame++
-      }
-      if (frame < TOTAL_FRAMES) {
-        requestAnimationFrame(tick)
-      } else {
-        console.log('[anim] complete')
-        window.__flyoverComplete = true
-      }
+    // En lugar de un loop con rAF dependiente del wall clock (que en
+    // headless sin GPU corre demasiado rapido y el screencast pierde
+    // frames), exponemos una funcion que el worker llama frame por
+    // frame. Cada call renderiza ese frame exacto, el worker hace
+    // screenshot, repeat. 100% deterministic.
+    window.__renderFrame = async function (f) {
+      renderFrame(f)
+      // Yield al browser para que el render se aplique antes del screenshot.
+      await new Promise(resolve => requestAnimationFrame(() => resolve()))
+      await new Promise(resolve => setTimeout(resolve, 0))
     }
+    window.__totalFrames = TOTAL_FRAMES
+
+    // Marcamos ready DESPUES de exponer __renderFrame.
+    window.__flyoverReady = true
 
     function renderFrame(f) {
       if (f < INTRO_END) {
@@ -326,6 +322,8 @@
       }
     }
 
+    // El waypoint display sigue siendo state-ful (acumula los ya mostrados)
+    // pero pasamos el frame actual desde renderFrame.
     function showWaypointIfHit(currentKm, here, currentFrame) {
       const card = document.getElementById('waypointCard')
       if (wpHideAt > 0 && currentFrame >= wpHideAt) {
@@ -361,7 +359,7 @@
       card.style.display = 'none'
     }
 
-    requestAnimationFrame(tick)
+    // No iniciamos loop automaticamente — el worker controla.
   }
 
   if (document.fonts && document.fonts.ready) {

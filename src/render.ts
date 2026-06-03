@@ -1,4 +1,4 @@
-import puppeteer, { Browser, Page, CDPSession } from 'puppeteer-core'
+import puppeteer, { Browser, Page } from 'puppeteer-core'
 import chromium from '@sparticuz/chromium'
 import ffmpeg from 'fluent-ffmpeg'
 import { promises as fs } from 'node:fs'
@@ -14,10 +14,7 @@ const VIDEO_WIDTH = 1080
 const VIDEO_HEIGHT = 1920
 const FPS = 30
 const TOTAL_FRAMES = 900 // 30 segundos
-// Subido porque el primer render en frío con SwiftShader + carga de
-// tiles MapTiler puede tardar ~30-50s en estabilizar.
-const READY_TIMEOUT_MS = 90_000
-const COMPLETE_TIMEOUT_MS = 120_000
+const READY_TIMEOUT_MS = 60_000
 
 const MAPTILER_KEY = process.env.MAPTILER_KEY
 if (!MAPTILER_KEY) {
@@ -64,60 +61,44 @@ function startStaticServer(): Promise<{ port: number; close: () => void }> {
 }
 
 /**
- * Captura frames via CDP screencast — más eficiente que page.screenshot
- * en loop porque el browser empuja frames a la frecuencia que pidas sin
- * bloquear el thread de la página.
+ * Captura frames llamando a window.__renderFrame(f) y haciendo
+ * page.screenshot por cada frame. 100% deterministic — no dependemos
+ * del wall clock del headless Chromium (que en containers sin GPU
+ * corre demasiado rápido y el screencast pierde frames).
+ *
+ * Más lento que screencast (~25-40ms/frame vs streaming) pero garantiza
+ * que los 900 frames quedan grabados.
  */
-async function captureFrames(
-  page: Page,
-  client: CDPSession,
-  framesDir: string,
-): Promise<number> {
-  let frameIdx = 0
-  let lastWritten = -1
+async function captureFrames(page: Page, framesDir: string): Promise<number> {
+  const totalFrames = (await page.evaluate(() => (window as any).__totalFrames)) as number
+  if (!totalFrames) throw new Error('window.__totalFrames not exposed by animation')
 
-  client.on('Page.screencastFrame', async event => {
-    const idx = frameIdx++
-    try {
-      const buf = Buffer.from(event.data, 'base64')
-      await fs.writeFile(
-        path.join(framesDir, `frame-${idx.toString().padStart(5, '0')}.jpg`),
-        buf,
-      )
-      lastWritten = idx
-    } catch (e) {
-      console.error('[render] frame write error', e)
-    } finally {
-      try {
-        await client.send('Page.screencastFrameAck', { sessionId: event.sessionId })
-      } catch {
-        // El cliente puede haberse cerrado.
-      }
+  console.log(`[render] capturing ${totalFrames} frames…`)
+  const t0 = Date.now()
+
+  for (let f = 0; f < totalFrames; f++) {
+    // Renderizar el frame en la página y esperar a que se aplique.
+    await page.evaluate((frame: number) => {
+      return (window as any).__renderFrame(frame)
+    }, f)
+
+    const filePath = path.join(framesDir, `frame-${f.toString().padStart(5, '0')}.jpg`)
+    await page.screenshot({
+      path: filePath as `${string}.jpg`,
+      type: 'jpeg',
+      quality: 88,
+      omitBackground: false,
+    })
+
+    if (f > 0 && f % 100 === 0) {
+      const elapsed = (Date.now() - t0) / 1000
+      const fps = f / elapsed
+      console.log(`[render] frame ${f}/${totalFrames} (${fps.toFixed(1)}fps)`)
     }
-  })
+  }
 
-  await client.send('Page.startScreencast', {
-    format: 'jpeg',
-    quality: 92,
-    everyNthFrame: 1,
-    maxWidth: VIDEO_WIDTH,
-    maxHeight: VIDEO_HEIGHT,
-  })
-
-  // Esperar a que la página marque __flyoverComplete = true.
-  await page.waitForFunction('window.__flyoverComplete === true', {
-    timeout: COMPLETE_TIMEOUT_MS,
-  })
-
-  // Margen para que los últimos frames lleguen al ack.
-  await new Promise(resolve => setTimeout(resolve, 500))
-
-  await client.send('Page.stopScreencast')
-
-  // Otro margen pequeño por si quedan acks en cola.
-  await new Promise(resolve => setTimeout(resolve, 300))
-
-  return lastWritten + 1
+  console.log(`[render] captured all ${totalFrames} frames in ${((Date.now() - t0) / 1000).toFixed(1)}s`)
+  return totalFrames
 }
 
 /**
@@ -246,8 +227,7 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
       throw waitErr
     }
 
-    const client = await page.target().createCDPSession()
-    const framesCount = await captureFrames(page, client, framesDir)
+    const framesCount = await captureFrames(page, framesDir)
 
     if (framesCount < TOTAL_FRAMES * 0.9) {
       throw new Error(
