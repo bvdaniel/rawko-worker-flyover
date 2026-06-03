@@ -10,11 +10,16 @@
 //   23-30s (frame 690-900): outro con stats finales en grande
 
 (function () {
-  const TOTAL_FRAMES = 900
+  // 20s vertical para Reels/TikTok/Stories. Reducimos de 30s a 20s
+  // porque el SwiftShader/Mesa software rendering pierde el contexto
+  // WebGL después de ~13-14 min de captura por presión de memoria
+  // interna del WebGL context. 600 frames = ~9 min de captura, dentro
+  // del margen de seguridad antes del context lost.
+  const TOTAL_FRAMES = 600
   const FPS = 30
-  const INTRO_END = 90
-  const ROUTE_END = 690
-  const OUTRO_END = TOTAL_FRAMES
+  const INTRO_END = 60        // 2s intro
+  const ROUTE_END = 480       // 14s recorrido
+  const OUTRO_END = TOTAL_FRAMES // 4s outro
 
   function deg2rad(d) {
     return (d * Math.PI) / 180

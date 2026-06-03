@@ -12,7 +12,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const VIDEO_WIDTH = 1080
 const VIDEO_HEIGHT = 1920
 const FPS = 30
-const TOTAL_FRAMES = 900 // 30 segundos
+const TOTAL_FRAMES = 600 // 20 segundos — ver nota en animation.js
 const READY_TIMEOUT_MS = 60_000
 
 const MAPTILER_KEY = process.env.MAPTILER_KEY
@@ -93,6 +93,13 @@ async function captureFrames(page: Page, framesDir: string): Promise<number> {
       const elapsed = (Date.now() - t0) / 1000
       const fps = f / elapsed
       console.log(`[render] frame ${f}/${totalFrames} (${fps.toFixed(1)}fps)`)
+      // Forzar GC cada 100 frames para liberar buffers WebGL temporales
+      // y atrasar el context lost del SwiftShader.
+      await page.evaluate(() => {
+        if (typeof (globalThis as any).gc === 'function') {
+          ;(globalThis as any).gc()
+        }
+      }).catch(() => {})
     }
   }
 
@@ -159,6 +166,11 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
         '--disable-background-timer-throttling',
         '--disable-renderer-backgrounding',
         '--disable-backgrounding-occluded-windows',
+        // Exponer gc() al global para que podamos llamar a window.gc()
+        // entre frames y forzar liberación de buffers WebGL temporales
+        // (SwiftShader software rendering los acumula y pierde el
+        // contexto después de ~13 min de captura intensiva).
+        '--js-flags=--expose-gc',
         `--window-size=${VIDEO_WIDTH},${VIDEO_HEIGHT}`,
         '--font-render-hinting=none',
       ],
