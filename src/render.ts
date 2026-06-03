@@ -13,8 +13,10 @@ const VIDEO_WIDTH = 1080
 const VIDEO_HEIGHT = 1920
 const FPS = 30
 const TOTAL_FRAMES = 900 // 30 segundos
-const READY_TIMEOUT_MS = 30_000
-const COMPLETE_TIMEOUT_MS = 90_000
+// Subido porque el primer render en frío con SwiftShader + carga de
+// tiles MapTiler puede tardar ~30-50s en estabilizar.
+const READY_TIMEOUT_MS = 90_000
+const COMPLETE_TIMEOUT_MS = 120_000
 
 const MAPTILER_KEY = process.env.MAPTILER_KEY
 if (!MAPTILER_KEY) {
@@ -164,9 +166,14 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-gpu',
+        // Habilitar WebGL via SwiftShader (rendering software). Sin esto,
+        // en contenedores sin GPU MapLibre falla al intentar inicializar
+        // el contexto WebGL y la página nunca llega a __flyoverReady.
+        '--use-gl=swiftshader',
+        '--enable-webgl',
+        '--ignore-gpu-blocklist',
+        '--enable-accelerated-2d-canvas',
         '--font-render-hinting=none',
-        // Window size matches el output, así no hay scaling raro.
         `--window-size=${VIDEO_WIDTH},${VIDEO_HEIGHT}`,
       ],
       defaultViewport: { width: VIDEO_WIDTH, height: VIDEO_HEIGHT, deviceScaleFactor: 1 },
@@ -174,6 +181,34 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
     })
     const page = await browser.newPage()
     await page.setViewport({ width: VIDEO_WIDTH, height: VIDEO_HEIGHT, deviceScaleFactor: 1 })
+
+    // Forward de logs del browser al stdout para que en Railway veamos
+    // qué pasa adentro de la página (errores de MapLibre, WebGL, fetch).
+    page.on('console', msg => {
+      const type = msg.type()
+      const text = msg.text()
+      if (type === 'error' || type === 'warn') {
+        console.log(`[browser:${type}] ${text}`)
+      } else if (text.startsWith('[anim]')) {
+        console.log(`[browser] ${text}`)
+      }
+    })
+    page.on('pageerror', (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err)
+      console.log(`[browser:pageerror] ${message}`)
+    })
+    page.on('requestfailed', req => {
+      const u = req.url()
+      // Solo logueamos los fallos relevantes (tiles, scripts).
+      if (
+        u.includes('maptiler') ||
+        u.includes('unpkg.com') ||
+        u.endsWith('.js') ||
+        u.endsWith('.css')
+      ) {
+        console.log(`[browser:requestfailed] ${u} → ${req.failure()?.errorText}`)
+      }
+    })
 
     // Inyectar la data de la ruta antes de cargar la página.
     await page.evaluateOnNewDocument(
@@ -188,9 +223,27 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
     await page.goto(url, { waitUntil: 'networkidle0', timeout: 60_000 })
 
     // Esperar a que la animación marque ready (terrain cargado, fuentes ok).
-    await page.waitForFunction('window.__flyoverReady === true', {
-      timeout: READY_TIMEOUT_MS,
-    })
+    // Si falla, sacamos screenshot para debug.
+    try {
+      await page.waitForFunction('window.__flyoverReady === true', {
+        timeout: READY_TIMEOUT_MS,
+      })
+    } catch (waitErr) {
+      // Capturar estado actual para diagnosticar.
+      const debugPath = path.join(tmpRoot, 'debug-not-ready.jpg')
+      try {
+        await page.screenshot({ path: debugPath as `${string}.jpg`, type: 'jpeg', quality: 80 })
+        console.log(`[render] screenshot saved at ${debugPath}`)
+      } catch {}
+      const state = await page.evaluate(() => ({
+        hasInput: typeof (window as any).__flyoverInput !== 'undefined',
+        ready: (window as any).__flyoverReady,
+        error: (window as any).__flyoverError,
+        mapInit: typeof (window as any).maplibregl !== 'undefined',
+      }))
+      console.log('[render] page state at timeout:', JSON.stringify(state))
+      throw waitErr
+    }
 
     const client = await page.target().createCDPSession()
     const framesCount = await captureFrames(page, client, framesDir)

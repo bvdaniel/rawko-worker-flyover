@@ -101,20 +101,36 @@
   }
 
   async function main() {
+    console.log('[anim] starting')
     const input = window.__flyoverInput
     if (!input) {
-      console.error('No __flyoverInput provided')
+      console.error('[anim] No __flyoverInput provided')
       window.__flyoverError = 'missing input'
       window.__flyoverComplete = true
       return
     }
 
     const { route, maptilerKey } = input
+    console.log(`[anim] route loaded: ${route?.title || '?'}`)
+    if (!maptilerKey) {
+      console.error('[anim] maptilerKey missing')
+    }
     const coords = route.geojson.coordinates
     if (!coords || coords.length < 2) {
+      console.error('[anim] route has too few points', coords?.length)
       window.__flyoverError = 'route has too few points'
       window.__flyoverComplete = true
       return
+    }
+    console.log(`[anim] coords: ${coords.length} points`)
+
+    // Diagnóstico de WebGL — si no hay contexto, MapLibre va a fallar.
+    try {
+      const testCanvas = document.createElement('canvas')
+      const gl = testCanvas.getContext('webgl2') || testCanvas.getContext('webgl')
+      console.log(`[anim] WebGL: ${gl ? 'OK' : 'MISSING'}`)
+    } catch (e) {
+      console.log(`[anim] WebGL probe failed: ${e}`)
     }
 
     const cumulative = buildCumulative(coords)
@@ -126,22 +142,47 @@
     // Estilo MapTiler outdoor con terrain DEM RGB. Pitched 3D.
     const style = `https://api.maptiler.com/maps/outdoor-v2/style.json?key=${maptilerKey}`
 
-    const map = new maplibregl.Map({
-      container: 'map',
-      style,
-      center: [centerLon, centerLat],
-      zoom: 8,
-      pitch: 0,
-      bearing: 0,
-      maxPitch: 80,
-      interactive: false,
-      attributionControl: false,
-      // Forzar render-on-demand off para no perder frames durante captura.
-      renderWorldCopies: false,
-      fadeDuration: 0,
+    console.log(`[anim] creating map with style ${style.substring(0, 80)}...`)
+    let map
+    try {
+      map = new maplibregl.Map({
+        container: 'map',
+        style,
+        center: [centerLon, centerLat],
+        zoom: 8,
+        pitch: 0,
+        bearing: 0,
+        maxPitch: 80,
+        interactive: false,
+        attributionControl: false,
+        renderWorldCopies: false,
+        fadeDuration: 0,
+      })
+    } catch (e) {
+      console.error(`[anim] MapLibre constructor threw: ${e?.message || e}`)
+      window.__flyoverError = 'maplibre constructor failed'
+      window.__flyoverComplete = true
+      return
+    }
+
+    map.on('error', e => {
+      console.error(`[anim] MapLibre error: ${e?.error?.message || JSON.stringify(e)}`)
     })
 
-    await new Promise(resolve => map.once('load', resolve))
+    console.log('[anim] waiting for map load…')
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('map load timeout 25s')), 25_000)
+      map.once('load', () => {
+        clearTimeout(timeout)
+        resolve(undefined)
+      })
+    }).catch(e => {
+      console.error(`[anim] map load failed: ${e.message}`)
+      window.__flyoverError = 'map load failed'
+      window.__flyoverComplete = true
+      throw e
+    })
+    console.log('[anim] map loaded')
 
     // Agregar terrain DEM RGB para 3D real.
     map.addSource('terrain-rgb', {
@@ -252,6 +293,7 @@
 
     // Esperar a que el terrain esté listo + un par de frames extras
     // para evitar pop-in al empezar a capturar.
+    console.log('[anim] waiting for tiles…')
     await new Promise(resolve => setTimeout(resolve, 800))
     if (!map.isStyleLoaded()) {
       await new Promise(resolve => map.once('idle', resolve))
@@ -259,6 +301,7 @@
     await new Promise(resolve => setTimeout(resolve, 300))
 
     // ---------- Inicio de la captura: marcamos ready ----------
+    console.log('[anim] ready')
     window.__flyoverReady = true
 
     // Cámara inicial — alta y lejos para el fly-in épico.
