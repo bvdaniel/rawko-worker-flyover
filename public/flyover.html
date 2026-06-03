@@ -31,16 +31,22 @@
         width: 100%;
         height: 100%;
         background: #1a1a1a;
+        z-index: 1;
       }
-      /* Canvas para dibujar polyline animada + cursor encima del mapa.
-         Leaflet usa SVG por default pero Canvas custom va mas suave. */
+      /* Canvas para dibujar polyline + cursor. z-index > Leaflet (que usa
+         400 internamente para sus panes) para garantizar que la línea
+         dorada quede encima de los tiles. Sin esto la polyline se dibujaba
+         debajo del mapa y solo se veían cambios de color sutiles. */
       #fxCanvas {
         position: absolute;
         inset: 0;
         width: 100%;
         height: 100%;
         pointer-events: none;
+        z-index: 500;
       }
+      .overlay { z-index: 700; }
+      .outro { z-index: 800; }
       .overlay {
         position: absolute;
         pointer-events: none;
