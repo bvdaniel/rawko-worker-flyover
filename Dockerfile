@@ -4,7 +4,7 @@
 # por Puppeteer. Esto garantiza compatibilidad de la build con la
 # versión de Chromium que controla Puppeteer.
 
-FROM node:20-bookworm-slim AS base
+FROM node:22-bookworm-slim AS base
 
 # Dependencias del sistema: Chromium runtime + FFmpeg + fonts (para que
 # los textos del overlay renderen igual que en local). MapLibre canvas

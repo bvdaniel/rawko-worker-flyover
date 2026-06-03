@@ -11,7 +11,7 @@
     "test:single": "tsx src/cli.ts"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",
