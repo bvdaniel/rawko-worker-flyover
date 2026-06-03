@@ -1,14 +1,14 @@
-# Dockerfile multi-stage para Railway / Render.
+# Dockerfile para Railway.
 #
-# Image base: node:20 sobre Debian con Chromium y FFmpeg preinstalados
-# por Puppeteer. Esto garantiza compatibilidad de la build con la
-# versión de Chromium que controla Puppeteer.
+# Single-stage: usamos el Chromium que Puppeteer descarga
+# automáticamente (viene con SwiftShader correctamente configurado para
+# WebGL en containers sin GPU). El chromium de Debian (apt) tiene
+# SwiftShader desactivado y MapLibre falla con
+# "Could not create a WebGL context".
 
-FROM node:22-bookworm-slim AS base
+FROM node:22-bookworm-slim
 
-# Dependencias del sistema: Chromium runtime + FFmpeg + fonts (para que
-# los textos del overlay renderen igual que en local). MapLibre canvas
-# necesita libgl + libxshmfence + libcairo.
+# Runtime deps de Chromium + FFmpeg + fonts.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     fonts-liberation \
@@ -29,32 +29,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpangocairo-1.0-0 \
     libcairo2 \
     libasound2 \
-    chromium \
+    libgl1 \
+    libegl1 \
+    libgles2 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Permite que Puppeteer use Chromium del sistema en lugar de descargar
-# su propia copia (más ligero, menos riesgo de versiones mismatched).
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV NODE_ENV=production
 
 WORKDIR /app
 
-# Build dependencies stage — instala todo y compila TS.
-FROM base AS build
+# El install de puppeteer (no puppeteer-core) descarga Chromium con
+# SwiftShader al cache, /root/.cache/puppeteer.
 COPY package.json ./
 COPY tsconfig.json ./
 RUN npm install --no-audit --no-fund
+
 COPY src ./src
 COPY public ./public
 RUN npm run build
-
-# Runtime stage — solo lo necesario para correr.
-FROM base AS runtime
-ENV NODE_ENV=production
-COPY --from=build /app/package.json ./package.json
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/public ./public
-RUN npm install --omit=dev --no-audit --no-fund
 
 CMD ["node", "dist/index.js"]

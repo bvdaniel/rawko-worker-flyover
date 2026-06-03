@@ -166,9 +166,9 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        // Habilitar WebGL via SwiftShader (rendering software). Sin esto,
-        // en contenedores sin GPU MapLibre falla al intentar inicializar
-        // el contexto WebGL y la página nunca llega a __flyoverReady.
+        // Habilitar WebGL via SwiftShader (rendering software). El
+        // Chromium de Puppeteer trae swiftshader.dll/libGLESv2.so
+        // bundled, asi que estos flags lo activan correctamente.
         '--use-gl=swiftshader',
         '--enable-webgl',
         '--ignore-gpu-blocklist',
@@ -177,7 +177,8 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
         `--window-size=${VIDEO_WIDTH},${VIDEO_HEIGHT}`,
       ],
       defaultViewport: { width: VIDEO_WIDTH, height: VIDEO_HEIGHT, deviceScaleFactor: 1 },
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+      // No pasamos executablePath — usamos el Chromium descargado por
+      // Puppeteer durante npm install, que incluye SwiftShader.
     })
     const page = await browser.newPage()
     await page.setViewport({ width: VIDEO_WIDTH, height: VIDEO_HEIGHT, deviceScaleFactor: 1 })
