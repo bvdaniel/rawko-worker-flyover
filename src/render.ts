@@ -13,7 +13,9 @@ const VIDEO_WIDTH = 1080
 const VIDEO_HEIGHT = 1920
 const FPS = 30
 const TOTAL_FRAMES = 600 // 20 segundos — ver nota en animation.js
-const READY_TIMEOUT_MS = 60_000
+// 2 min: con software WebGL el setup tarda ~50s (download style +
+// tiles MapTiler + waitForTerrain) y queremos margen.
+const READY_TIMEOUT_MS = 120_000
 
 const MAPTILER_KEY = process.env.MAPTILER_KEY
 if (!MAPTILER_KEY) {
@@ -226,14 +228,21 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
 
     const url = `http://127.0.0.1:${port}/flyover.html`
     console.log(`[render] navigating to ${url}`)
-    await page.goto(url, { waitUntil: 'networkidle0', timeout: 60_000 })
+    // domcontentloaded en lugar de networkidle0: queremos arrancar el
+    // waitForFunction lo antes posible, no después de que tiles de
+    // MapTiler hayan terminado de llegar (eso puede tomar 50s+ y
+    // descuenta del READY_TIMEOUT). La animación se encarga internamente
+    // de esperar al map.idle antes de setear __flyoverReady.
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
 
     // Esperar a que la animación marque ready (terrain cargado, fuentes ok).
-    // Si falla, sacamos screenshot para debug.
+    // Usamos arrow function (no string) — el string form a veces falla
+    // a evaluar window.* en contextos isolated del polling.
     try {
-      await page.waitForFunction('window.__flyoverReady === true', {
-        timeout: READY_TIMEOUT_MS,
-      })
+      await page.waitForFunction(
+        () => (window as unknown as { __flyoverReady?: boolean }).__flyoverReady === true,
+        { timeout: READY_TIMEOUT_MS, polling: 250 },
+      )
     } catch (waitErr) {
       // Capturar estado actual para diagnosticar.
       const debugPath = path.join(tmpRoot, 'debug-not-ready.jpg')
