@@ -166,13 +166,18 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        // Habilitar WebGL via SwiftShader (rendering software). El
-        // Chromium de Puppeteer trae swiftshader.dll/libGLESv2.so
-        // bundled, asi que estos flags lo activan correctamente.
+        // Chrome 119+ deprecó SwiftShader como backend default y ahora
+        // requiere este flag explícito. Sin él Chrome reporta
+        // GL_VENDOR=Disabled GL_RENDERER=Disabled aunque pasemos
+        // --use-gl=swiftshader.
+        '--enable-unsafe-swiftshader',
         '--use-gl=swiftshader',
         '--enable-webgl',
         '--ignore-gpu-blocklist',
         '--enable-accelerated-2d-canvas',
+        // En proceso unico: evita problemas de IPC con el GPU process
+        // que en algunos containers no inicia correctamente.
+        '--in-process-gpu',
         '--font-render-hinting=none',
         `--window-size=${VIDEO_WIDTH},${VIDEO_HEIGHT}`,
       ],
