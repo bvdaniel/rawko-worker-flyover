@@ -44,7 +44,7 @@ apt-get install -y --no-install-recommends \
   libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
   libgbm1 libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libasound2t64 \
   libxshmfence1 libx11-xcb1 \
-  libgl1-mesa-dri libegl1-mesa libgles2-mesa libosmesa6 mesa-utils \
+  libgl1-mesa-dri libegl1 libgles2 libosmesa6 mesa-utils \
   libnspr4 libxss1 libdbus-1-3 libglib2.0-0 libexpat1 libuuid1 \
   libxext6 libxi6 libxtst6 libxrender1 libfontconfig1
 
