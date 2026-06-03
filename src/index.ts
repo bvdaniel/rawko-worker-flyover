@@ -3,6 +3,17 @@ import { claimJob, loadRouteData, markDone, markFailed } from './queue.js'
 import { renderFlyover, cleanupTmp } from './render.js'
 import { uploadFlyover } from './upload.js'
 
+// Forzar line-buffered stdout para que los logs aparezcan en journald
+// inmediatamente. Sin esto, Node bufferea por bloque cuando stdout no
+// es TTY y los logs no llegan al journal hasta que el buffer se llena
+// o el proceso muere.
+if ((process.stdout as any)._handle?.setBlocking) {
+  ;(process.stdout as any)._handle.setBlocking(true)
+}
+if ((process.stderr as any)._handle?.setBlocking) {
+  ;(process.stderr as any)._handle.setBlocking(true)
+}
+
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 30_000)
 
 function sleep(ms: number) {

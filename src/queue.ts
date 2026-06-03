@@ -29,7 +29,14 @@ export async function loadRouteData(experienceId: string): Promise<RouteData | n
     .select('id, title, date, location')
     .eq('id', experienceId)
     .maybeSingle()
-  if (expErr || !exp) return null
+  if (expErr) {
+    console.error(`[queue] loadRouteData experiences error for ${experienceId}`, expErr)
+    return null
+  }
+  if (!exp) {
+    console.error(`[queue] loadRouteData: experience ${experienceId} not found`)
+    return null
+  }
 
   // Preferimos la route recorded sobre la planned.
   const { data: routes, error: routesErr } = await supabase
@@ -39,11 +46,24 @@ export async function loadRouteData(experienceId: string): Promise<RouteData | n
       'duration_seconds, max_altitude_m',
     )
     .eq('experience_id', experienceId)
-  if (routesErr || !routes || routes.length === 0) return null
+  if (routesErr) {
+    console.error(`[queue] loadRouteData routes error for ${experienceId}`, routesErr)
+    return null
+  }
+  if (!routes || routes.length === 0) {
+    console.error(`[queue] loadRouteData: no routes for experience ${experienceId}`)
+    return null
+  }
   const route =
     (routes.find(r => (r as any).source === 'recorded') as any) ??
     (routes.find(r => (r as any).source === 'planned') as any)
-  if (!route?.route_geojson) return null
+  if (!route?.route_geojson) {
+    console.error(
+      `[queue] loadRouteData: no recorded/planned geojson for ${experienceId}, ` +
+      `sources=${routes.map(r => (r as any).source).join(',')}`,
+    )
+    return null
+  }
 
   const { data: waypointRows } = await supabase
     .from('route_waypoints')
