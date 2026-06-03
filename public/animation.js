@@ -10,6 +10,10 @@
 //   23-30s (frame 690-900): outro con stats finales en grande
 
 (function () {
+  // PREVIEW: intro ultra-corta para validar el cursor-follow del
+  // recorrido con pocos frames capturados. Frame 0-10 = intro fly-in,
+  // frame 10+ = ya entra en fase route con cursor-follow 3D.
+  //
   // 20s vertical para Reels/TikTok/Stories. Reducimos de 30s a 20s
   // porque el SwiftShader/Mesa software rendering pierde el contexto
   // WebGL después de ~13-14 min de captura por presión de memoria
@@ -17,9 +21,9 @@
   // del margen de seguridad antes del context lost.
   const TOTAL_FRAMES = 600
   const FPS = 30
-  const INTRO_END = 60        // 2s intro
-  const ROUTE_END = 480       // 14s recorrido
-  const OUTRO_END = TOTAL_FRAMES // 4s outro
+  const INTRO_END = 10        // 0.33s intro (preview)
+  const ROUTE_END = 540       // 17.7s recorrido
+  const OUTRO_END = TOTAL_FRAMES // 2s outro
 
   function deg2rad(d) {
     return (d * Math.PI) / 180
