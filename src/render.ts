@@ -9,21 +9,8 @@ import type { RouteData, RenderResult } from './types.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-// El layout CSS sigue siendo 1080x1920 (no tocamos el HTML), pero
-// usamos deviceScaleFactor 0.667 para que el browser internamente
-// renderee el backing buffer a 720x1280. Eso reduce el trabajo de
-// WebGL a ~44% del original. ffmpeg upscale el output a 1080x1920.
-//
-// Razón: software WebGL en droplet de 1 GB hace ~23s/frame a 1080x1920
-// (memoria saturada → swap thrashing). A 720x1280 son ~5-8s/frame.
-// Pérdida de calidad imperceptible para Reels/TikTok/Stories.
-const VIEWPORT_CSS_WIDTH = 1080
-const VIEWPORT_CSS_HEIGHT = 1920
-const CAPTURE_SCALE = 2 / 3
-const VIDEO_WIDTH = Math.round(VIEWPORT_CSS_WIDTH * CAPTURE_SCALE)   // 720
-const VIDEO_HEIGHT = Math.round(VIEWPORT_CSS_HEIGHT * CAPTURE_SCALE) // 1280
-const OUTPUT_WIDTH = 1080
-const OUTPUT_HEIGHT = 1920
+const VIDEO_WIDTH = 1080
+const VIDEO_HEIGHT = 1920
 const FPS = 30
 const TOTAL_FRAMES = 600 // 20 segundos — ver nota en animation.js
 // 2 min: con software WebGL el setup tarda ~50s (download style +
@@ -181,12 +168,9 @@ function encodeMp4(framesDir: string, outputPath: string, framesCount: number): 
         '-movflags +faststart',
         '-r 30',
         '-shortest',
-        // Calidad razonable; con CRF 22 obtenemos ~15-25 MB en 30s
+        // Calidad razonable; con CRF 22 obtenemos ~15-25 MB en 30s @1080p
         '-crf 22',
         '-preset medium',
-        // Upscale del input 720x1280 al output 1080x1920 con lanczos
-        // (mejor preservación de detalles que bicubic default).
-        `-vf scale=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}:flags=lanczos`,
       ])
       .save(outputPath)
       .on('end', () => resolve())
@@ -210,11 +194,10 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
     // forzan software rendering (no hay GPU en el droplet).
     browser = await puppeteer.launch({
       headless: false,
-      // 5 min por CDP call. Default es 180s y con software WebGL en
-      // un droplet de 1 GB de RAM, frames individuales pueden tomar
-      // muchos segundos cuando MapLibre re-renderea regiones nuevas
-      // del terrain. Sin esto, una sola screenshot lenta rompe todo.
-      protocolTimeout: 300_000,
+      // 10 min por CDP call. Con software WebGL + memoria saturada
+      // un page.evaluate / screenshot puede quedarse colgado mientras
+      // chrome procesa frames pesados. Más generoso > falla espuria.
+      protocolTimeout: 600_000,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -232,24 +215,13 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
         // (SwiftShader software rendering los acumula y pierde el
         // contexto después de ~13 min de captura intensiva).
         '--js-flags=--expose-gc',
-        `--window-size=${VIEWPORT_CSS_WIDTH},${VIEWPORT_CSS_HEIGHT}`,
+        `--window-size=${VIDEO_WIDTH},${VIDEO_HEIGHT}`,
         '--font-render-hinting=none',
       ],
-      // El layout es 1080x1920 CSS pero el deviceScaleFactor=0.667 hace
-      // que el backing buffer (y por tanto la captura) sea 720x1280
-      // físico. Reduce 56% el trabajo de WebGL sin tocar el HTML.
-      defaultViewport: {
-        width: VIEWPORT_CSS_WIDTH,
-        height: VIEWPORT_CSS_HEIGHT,
-        deviceScaleFactor: CAPTURE_SCALE,
-      },
+      defaultViewport: { width: VIDEO_WIDTH, height: VIDEO_HEIGHT, deviceScaleFactor: 1 },
     })
     const page = await browser.newPage()
-    await page.setViewport({
-      width: VIEWPORT_CSS_WIDTH,
-      height: VIEWPORT_CSS_HEIGHT,
-      deviceScaleFactor: CAPTURE_SCALE,
-    })
+    await page.setViewport({ width: VIDEO_WIDTH, height: VIDEO_HEIGHT, deviceScaleFactor: 1 })
 
     // Forward de logs del browser al stdout para que en Railway veamos
     // qué pasa adentro de la página (errores de MapLibre, WebGL, fetch).
