@@ -17,10 +17,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-ENV NODE_ENV=production
-
 WORKDIR /app
 
+# IMPORTANTE: instalar deps con NODE_ENV unset (sino npm omite
+# devDependencies como typescript y npm run build falla con
+# "tsc: not found"). Recién después del build seteamos NODE_ENV=production
+# para el runtime.
 COPY package.json ./
 COPY tsconfig.json ./
 RUN npm install --no-audit --no-fund
@@ -28,5 +30,7 @@ RUN npm install --no-audit --no-fund
 COPY src ./src
 COPY public ./public
 RUN npm run build
+
+ENV NODE_ENV=production
 
 CMD ["node", "dist/index.js"]
