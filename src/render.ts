@@ -1,5 +1,4 @@
-import puppeteer, { Browser, Page } from 'puppeteer-core'
-import chromium from '@sparticuz/chromium'
+import puppeteer, { Browser, Page } from 'puppeteer'
 import ffmpeg from 'fluent-ffmpeg'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -142,24 +141,28 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
   const { port, close: closeServer } = await startStaticServer()
   let browser: Browser | null = null
   try {
-    // Habilitamos WebGL via SwiftShader desde la configuración de
-    // @sparticuz/chromium. Sin esto el package por default tiene
-    // graphics deshabilitados para optimizar el cold start en Lambda.
-    chromium.setGraphicsMode = true
-
-    const executablePath = await chromium.executablePath()
-    console.log(`[render] using chromium at ${executablePath}`)
-
+    // VPS Linux con Xvfb + Mesa software rendering. Corremos en modo
+    // "headless: false" (Xvfb provee el display) para que MapLibre
+    // tenga un contexto WebGL real via ANGLE/SwiftShader. Las flags
+    // forzan software rendering (no hay GPU en el droplet).
     browser = await puppeteer.launch({
-      executablePath,
+      headless: false,
       args: [
-        ...chromium.args,
-        // Forzamos resolución del output.
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--enable-unsafe-swiftshader',
+        '--ignore-gpu-blocklist',
+        '--use-gl=angle',
+        '--use-angle=swiftshader',
+        '--enable-webgl',
+        '--disable-background-timer-throttling',
+        '--disable-renderer-backgrounding',
+        '--disable-backgrounding-occluded-windows',
         `--window-size=${VIDEO_WIDTH},${VIDEO_HEIGHT}`,
         '--font-render-hinting=none',
       ],
       defaultViewport: { width: VIDEO_WIDTH, height: VIDEO_HEIGHT, deviceScaleFactor: 1 },
-      headless: chromium.headless,
     })
     const page = await browser.newPage()
     await page.setViewport({ width: VIDEO_WIDTH, height: VIDEO_HEIGHT, deviceScaleFactor: 1 })

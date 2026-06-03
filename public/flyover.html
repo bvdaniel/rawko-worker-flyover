@@ -6,7 +6,7 @@
     <title>Rawko Flyover</title>
     <link
       rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
     />
     <style>
       :root {
@@ -30,23 +30,8 @@
         inset: 0;
         width: 100%;
         height: 100%;
-        background: #1a1a1a;
-        z-index: 1;
       }
-      /* Canvas para dibujar polyline + cursor. z-index > Leaflet (que usa
-         400 internamente para sus panes) para garantizar que la línea
-         dorada quede encima de los tiles. Sin esto la polyline se dibujaba
-         debajo del mapa y solo se veían cambios de color sutiles. */
-      #fxCanvas {
-        position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-        pointer-events: none;
-        z-index: 500;
-      }
-      .overlay { z-index: 700; }
-      .outro { z-index: 800; }
+      /* Overlay base: respeta el área safe de mobile vertical 1080x1920 */
       .overlay {
         position: absolute;
         pointer-events: none;
@@ -56,6 +41,7 @@
       .overlay.visible {
         opacity: 1;
       }
+      /* Título arriba durante la intro */
       .title-block {
         top: 200px;
         left: 0;
@@ -68,9 +54,9 @@
         letter-spacing: 0.32em;
         text-transform: uppercase;
         font-weight: 700;
-        color: rgba(255, 255, 255, 0.92);
+        color: rgba(255, 255, 255, 0.85);
         margin-bottom: 24px;
-        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.85);
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
       }
       .title-main {
         font-family: "Fraunces", "Georgia", serif;
@@ -78,29 +64,33 @@
         line-height: 1.05;
         font-weight: 900;
         color: #fff;
-        text-shadow: 0 4px 14px rgba(0, 0, 0, 0.85);
+        text-shadow: 0 4px 14px rgba(0, 0, 0, 0.7);
         margin: 0;
       }
       .title-sub {
         font-size: 32px;
         font-weight: 600;
-        color: rgba(255, 255, 255, 0.95);
+        color: rgba(255, 255, 255, 0.9);
         margin-top: 28px;
-        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.85);
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
       }
+      /* Stats abajo durante el recorrido */
       .stats-strip {
         bottom: 140px;
         left: 60px;
         right: 60px;
         display: flex;
         justify-content: space-around;
-        background: rgba(0, 0, 0, 0.65);
+        background: rgba(0, 0, 0, 0.55);
         backdrop-filter: blur(20px);
         border-radius: 28px;
         padding: 28px 24px;
-        border: 1px solid rgba(255, 255, 255, 0.15);
+        border: 1px solid rgba(255, 255, 255, 0.12);
       }
-      .stat { text-align: center; flex: 1; }
+      .stat {
+        text-align: center;
+        flex: 1;
+      }
       .stat-value {
         font-size: 56px;
         font-weight: 900;
@@ -112,18 +102,19 @@
         font-weight: 700;
         letter-spacing: 0.18em;
         text-transform: uppercase;
-        color: rgba(255, 255, 255, 0.75);
+        color: rgba(255, 255, 255, 0.7);
         margin-top: 10px;
       }
+      /* Waypoint card flotante */
       .waypoint-card {
         bottom: 320px;
         left: 60px;
         right: 60px;
-        background: rgba(0, 0, 0, 0.78);
+        background: rgba(0, 0, 0, 0.7);
         backdrop-filter: blur(20px);
         border-radius: 24px;
         padding: 24px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.18);
         display: flex;
         align-items: center;
         gap: 20px;
@@ -136,8 +127,14 @@
         flex-shrink: 0;
         background: #222;
       }
-      .waypoint-body { flex: 1; min-width: 0; }
-      .waypoint-emoji { font-size: 40px; margin-bottom: 6px; }
+      .waypoint-body {
+        flex: 1;
+        min-width: 0;
+      }
+      .waypoint-emoji {
+        font-size: 40px;
+        margin-bottom: 6px;
+      }
       .waypoint-title {
         font-size: 36px;
         font-weight: 800;
@@ -147,15 +144,16 @@
       }
       .waypoint-meta {
         font-size: 22px;
-        color: rgba(255, 255, 255, 0.75);
+        color: rgba(255, 255, 255, 0.7);
       }
+      /* Outro: stats finales en grande */
       .outro {
         position: absolute;
         inset: 0;
         background: linear-gradient(
           to bottom,
-          rgba(0, 0, 0, 0.6) 0%,
-          rgba(0, 0, 0, 0.9) 100%
+          rgba(0, 0, 0, 0.55) 0%,
+          rgba(0, 0, 0, 0.85) 100%
         );
         display: flex;
         flex-direction: column;
@@ -166,7 +164,9 @@
         opacity: 0;
         transition: opacity 800ms ease-in-out;
       }
-      .outro.visible { opacity: 1; }
+      .outro.visible {
+        opacity: 1;
+      }
       .outro-title {
         font-family: "Fraunces", "Georgia", serif;
         font-size: 108px;
@@ -190,7 +190,7 @@
         font-size: 24px;
         letter-spacing: 0.22em;
         text-transform: uppercase;
-        color: rgba(255, 255, 255, 0.75);
+        color: rgba(255, 255, 255, 0.7);
         margin-top: 14px;
         font-weight: 700;
       }
@@ -205,17 +205,13 @@
         font-size: 22px;
         letter-spacing: 0.3em;
         text-transform: uppercase;
-        color: rgba(245, 241, 234, 0.75);
+        color: rgba(245, 241, 234, 0.7);
         margin-top: 8px;
       }
-      /* Oscurecer un poco el mapa para que los textos resalten */
-      .leaflet-tile-container { filter: brightness(0.78) saturate(1.05); }
-      .leaflet-control-attribution { display: none !important; }
     </style>
   </head>
   <body>
     <div id="map"></div>
-    <canvas id="fxCanvas" width="1080" height="1920"></canvas>
 
     <div id="title" class="overlay title-block">
       <div class="title-eyebrow" id="titleEyebrow"></div>
@@ -271,7 +267,7 @@
       <div class="outro-brand-sub">rawko.io</div>
     </div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
     <script src="/animation.js"></script>
   </body>
 </html>
