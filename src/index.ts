@@ -63,14 +63,21 @@ async function processOne(): Promise<boolean> {
 async function main() {
   console.log(`[worker] starting (poll every ${POLL_INTERVAL_MS}ms)`)
   let consecutiveErrors = 0
+  let idleTicks = 0
   while (true) {
     try {
       const processed = await processOne()
       consecutiveErrors = 0
       if (!processed) {
-        // Sin trabajo, esperar el polling interval.
+        // Loguear cada 10 polls cuando está idle, así sabemos que el
+        // worker está vivo y polleando aunque no haya trabajo.
+        idleTicks++
+        if (idleTicks % 10 === 1) {
+          console.log(`[worker] no jobs available (${idleTicks} consecutive idle polls)`)
+        }
         await sleep(POLL_INTERVAL_MS)
       } else {
+        idleTicks = 0
         // Si proceso uno, intentar inmediatamente otro sin esperar.
         await sleep(500)
       }
