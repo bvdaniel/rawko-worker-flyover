@@ -184,13 +184,22 @@
     })
     console.log('[anim] map loaded')
 
-    // Agregar terrain DEM RGB para 3D real.
-    map.addSource('terrain-rgb', {
-      type: 'raster-dem',
-      url: `https://api.maptiler.com/tiles/terrain-rgb-v2/tiles.json?key=${maptilerKey}`,
-      tileSize: 256,
-    })
-    map.setTerrain({ source: 'terrain-rgb', exaggeration: 1.6 })
+    // Agregar terrain DEM RGB para 3D real. Usamos un id único porque
+    // el style outdoor-v2 de MapTiler ya define internamente una source
+    // llamada "terrain-rgb" y maplibre tira si pisamos el nombre.
+    const TERRAIN_SOURCE_ID = 'flyover-terrain-rgb'
+    try {
+      if (!map.getSource(TERRAIN_SOURCE_ID)) {
+        map.addSource(TERRAIN_SOURCE_ID, {
+          type: 'raster-dem',
+          url: `https://api.maptiler.com/tiles/terrain-rgb-v2/tiles.json?key=${maptilerKey}`,
+          tileSize: 256,
+        })
+      }
+      map.setTerrain({ source: TERRAIN_SOURCE_ID, exaggeration: 1.6 })
+    } catch (e) {
+      console.warn(`[anim] terrain setup warning: ${e?.message || e}`)
+    }
 
     // Polyline completa (sombra) — opacidad baja para que se vea por
     // delante del cursor el camino que falta.

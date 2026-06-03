@@ -194,6 +194,15 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
         console.log(`[browser:requestfailed] ${u} → ${req.failure()?.errorText}`)
       }
     })
+    // Loguear responses 4xx/5xx para diagnosticar tiles o scripts que
+    // devuelven error. Filtramos favicon que es normal 404.
+    page.on('response', resp => {
+      const status = resp.status()
+      const u = resp.url()
+      if (status >= 400 && !u.endsWith('/favicon.ico')) {
+        console.log(`[browser:response ${status}] ${u}`)
+      }
+    })
 
     // Inyectar la data de la ruta antes de cargar la página.
     await page.evaluateOnNewDocument(
