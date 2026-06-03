@@ -32,6 +32,20 @@ if [ "$(id -u)" -ne 0 ]; then
   fail "este script tiene que correr como root (usa sudo)"
 fi
 
+log "0/8 swap (chromium + ffmpeg en droplet de 1 GB pueden OOM sin esto)"
+if ! swapon --show | grep -q "/swapfile"; then
+  if [ ! -f /swapfile ]; then
+    fallocate -l 2G /swapfile
+    chmod 600 /swapfile
+    mkswap /swapfile
+  fi
+  swapon /swapfile || true
+  if ! grep -q "/swapfile" /etc/fstab; then
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  fi
+fi
+free -h
+
 log "1/8 actualizando apt + instalando deps del sistema"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y

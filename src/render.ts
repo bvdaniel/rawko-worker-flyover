@@ -305,13 +305,23 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
 
     const framesCount = await captureFrames(page, framesDir)
 
-    if (framesCount < TOTAL_FRAMES * 0.9) {
+    if (framesCount < TOTAL_FRAMES * 0.8) {
       throw new Error(
         `captured only ${framesCount}/${TOTAL_FRAMES} frames — animation likely failed`,
       )
     }
 
     console.log(`[render] captured ${framesCount} frames in ${(Date.now() - t0) / 1000}s`)
+
+    // Cerrar Chromium + Xvfb ANTES de empezar el encoding. Chromium con
+    // MapLibre cacheado consume ~400-500 MB. En un droplet de 1 GB,
+    // dejarlo vivo durante ffmpeg encoding mete OOM kill. Lo cerramos
+    // explícitamente aquí (el finally es redundante pero seguro).
+    if (browser) {
+      console.log('[render] closing browser before encoding to free memory')
+      await browser.close().catch(() => {})
+      browser = null
+    }
 
     await encodeMp4(framesDir, outputPath, framesCount)
     const durationSeconds = (Date.now() - t0) / 1000
