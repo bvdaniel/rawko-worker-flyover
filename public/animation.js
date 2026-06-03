@@ -110,28 +110,24 @@
     const overviewZoom = map.getZoom()
     const overviewCenter = map.getCenter()
 
-    // Esperar a que las tiles carguen.
+    // Esperar a que las tiles carguen. Como la camara queda fija
+    // durante todo el video, una carga inicial buena evita reflows.
     console.log('[anim] waiting for tiles…')
-    await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('tile timeout 30s')), 30_000)
-      let tilesPending = 1
-      const onLoad = () => {
-        tilesPending--
-        if (tilesPending <= 0) {
-          clearTimeout(timeout)
+    await new Promise(resolve => {
+      let resolved = false
+      const done = () => {
+        if (!resolved) {
+          resolved = true
           resolve()
         }
       }
-      map.eachLayer(l => {
-        if (l._tiles) {
-          map.once('load', onLoad)
-        }
-      })
-      // Fallback: si load no dispara, esperamos un tiempo fijo.
-      setTimeout(() => { clearTimeout(timeout); resolve() }, 4000)
-    }).catch(e => {
-      console.warn(`[anim] tile wait: ${e.message}`)
+      // load dispara cuando todas las tiles visibles cargaron.
+      map.once('load', done)
+      // Fallback por si load nunca dispara: 6 segundos.
+      setTimeout(done, 6000)
     })
+    // Margen extra para que los tiles se pinten completos.
+    await new Promise(resolve => setTimeout(resolve, 1200))
     console.log('[anim] tiles ready')
 
     // Setup canvas overlay para polyline + cursor + glow.
@@ -266,16 +262,22 @@
     window.__flyoverReady = true
 
     function renderFrame(f) {
+      // Cámara FIJA en overview durante todo el video — toda la ruta
+      // visible siempre. Esto evita que Leaflet recargue tiles entre
+      // frames (causaba "tambaleo" y flashes en el video anterior). El
+      // protagonismo lo lleva la polyline dorada que se dibuja progre-
+      // sivamente sobre el mapa, look Strava classic 2D.
+      if (f === 0) {
+        map.setView(overviewCenter, overviewZoom, { animate: false })
+      }
+
       if (f < INTRO_END) {
-        // Intro: bird's eye fijo, fade del título cerca del final.
-        if (f === 0) {
-          map.setView(overviewCenter, overviewZoom)
-        }
+        // Intro: solo título visible.
         if (f > INTRO_END - 12) {
           const alpha = 1 - (f - (INTRO_END - 12)) / 12
           document.getElementById('title').style.opacity = String(Math.max(0, alpha))
         }
-        // Sin línea durante intro.
+        // Canvas limpio durante la intro (sin línea todavía).
         ctx.clearRect(0, 0, canvas.width, canvas.height)
       } else if (f < ROUTE_END) {
         if (f === INTRO_END) {
@@ -287,17 +289,6 @@
         const km = totalKm * eased
         const idx = findIndexForKm(km)
         const here = interpolate(idx, km)
-
-        // Pan suave del mapa que sigue al cursor, zoom medio.
-        // Combinamos el overview con el detail según routeT.
-        const detailZoom = Math.min(overviewZoom + 1.5, 14)
-        const currentZoom = lerp(overviewZoom, detailZoom, easeInOutCubic(Math.min(1, routeT * 2)))
-        // Centro va a moverse desde el overview center al here gradualmente
-        // pero manteniendose cerca del cursor.
-        const centerLerp = Math.min(1, routeT * 1.5)
-        const camLat = lerp(overviewCenter.lat, here[1], centerLerp)
-        const camLng = lerp(overviewCenter.lng, here[0], centerLerp)
-        map.setView([camLat, camLng], currentZoom, { animate: false })
 
         drawProgressiveLine(km, here)
 
@@ -314,10 +305,8 @@
           document.getElementById('stats').classList.remove('visible')
           hideWaypoint()
           document.getElementById('outro').classList.add('visible')
-          // Zoom out al overview.
-          map.setView(overviewCenter, overviewZoom, { animate: false })
         }
-        // Dibujo final estático del recorrido completo.
+        // Recorrido completo dibujado, queda en pantalla detrás del outro.
         drawProgressiveLine(totalKm, null)
       }
     }
