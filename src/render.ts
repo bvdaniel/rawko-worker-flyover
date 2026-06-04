@@ -1,346 +1,627 @@
-import puppeteer, { Browser, Page } from 'puppeteer'
-import ffmpeg from 'fluent-ffmpeg'
-import { promises as fs } from 'node:fs'
-import path from 'node:path'
+// Render del flyover usando @maplibre/maplibre-gl-native. Sin Chrome,
+// sin Xvfb. Renderea cada frame con MapLibre nativo (OpenGL), composita
+// los overlays editoriales con sharp y encodea el MP4 con ffmpeg.
+//
+// Tiempo esperado: ~6 min para 600 frames (intro + route + outro = 20s
+// de video) en una CPU moderna. Mucho más rápido que el approach
+// Chrome + software WebGL anterior.
+
+import mbgl from '@maplibre/maplibre-gl-native'
+import sharp from 'sharp'
+import { mkdir, writeFile, readFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { spawn } from 'node:child_process'
+import { performance } from 'node:perf_hooks'
 import os from 'node:os'
-import { fileURLToPath } from 'node:url'
-import http from 'node:http'
-import type { RouteData, RenderResult } from './types.js'
+import path from 'node:path'
+import { promises as fs } from 'node:fs'
+import {
+  svgTitle,
+  svgStats,
+  svgWaypoint,
+  svgOutro,
+  WAYPOINT_PHOTO_RECT,
+  fmtDateEs,
+  fmtDurationEs,
+  kindLabelEs,
+  kindTier,
+} from './overlays.js'
+import type { RouteData, RenderResult, WaypointData } from './types.js'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-
+// ====== Config ======
 const VIDEO_WIDTH = 1080
 const VIDEO_HEIGHT = 1920
 const FPS = 30
-const TOTAL_FRAMES = 600 // 20 segundos — ver nota en animation.js
-// 2 min: con software WebGL el setup tarda ~50s (download style +
-// tiles MapTiler + waitForTerrain) y queremos margen.
-const READY_TIMEOUT_MS = 120_000
+
+// 600 frames @ 30fps = 20s. Fases: intro 2s, route 15s, outro 3s.
+const TOTAL_FRAMES = 600
+const INTRO_END = 60
+const ROUTE_END = 510
+const OUTRO_END = TOTAL_FRAMES
+
+// Cámara cursor-follow
+const BEARING_LOOKAHEAD = 25
+const BEARING_EMA_ALPHA = 0.06
+const BEARING_MAX_DELTA_PER_FRAME = 2.5
+
+// Waypoints
+const MAX_WAYPOINTS = 6
+const WAYPOINT_CARD_FRAMES = 90
+const WAYPOINT_MIN_DIST_KM = 0.8
 
 const MAPTILER_KEY = process.env.MAPTILER_KEY
-if (!MAPTILER_KEY) {
-  console.warn('[render] MAPTILER_KEY not set — animation will fail to load tiles')
+const STYLE_URL = MAPTILER_KEY
+  ? `https://api.maptiler.com/maps/outdoor-v2/style.json?key=${MAPTILER_KEY}`
+  : 'https://tiles.openfreemap.org/styles/liberty'
+
+// ====== Utils geo ======
+function deg2rad(d: number): number {
+  return (d * Math.PI) / 180
 }
 
-/**
- * Sirve los archivos de /public en un puerto local para que Puppeteer
- * los cargue con http:// (necesario para que MapLibre y los workers
- * funcionen — file:// rompe la security policy de muchos browsers).
- */
-function startStaticServer(): Promise<{ port: number; close: () => void }> {
-  return new Promise(resolve => {
-    const publicDir = path.resolve(__dirname, '../public')
-    const server = http.createServer(async (req, res) => {
-      try {
-        const url = req.url ?? '/'
-        const filePath = path.join(
-          publicDir,
-          url === '/' ? 'flyover.html' : url.replace(/^\/+/, ''),
-        )
-        if (!filePath.startsWith(publicDir)) {
-          res.writeHead(403).end()
-          return
-        }
-        const data = await fs.readFile(filePath)
-        const ext = path.extname(filePath).toLowerCase()
-        const contentType =
-          ext === '.html' ? 'text/html; charset=utf-8' :
-          ext === '.js' ? 'application/javascript' :
-          ext === '.css' ? 'text/css' :
-          'application/octet-stream'
-        res.writeHead(200, { 'Content-Type': contentType }).end(data)
-      } catch (e) {
-        res.writeHead(404).end()
-      }
-    })
-    server.listen(0, '127.0.0.1', () => {
-      const addr = server.address()
-      const port = typeof addr === 'object' && addr ? addr.port : 0
-      resolve({ port, close: () => server.close() })
-    })
-  })
+function haversineKm(a: [number, number], b: [number, number]): number {
+  const R = 6371
+  const dLat = deg2rad(b[1] - a[1])
+  const dLon = deg2rad(b[0] - a[0])
+  const lat1 = deg2rad(a[1])
+  const lat2 = deg2rad(b[1])
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(h))
 }
 
-/**
- * Captura frames llamando a window.__renderFrame(f) y haciendo
- * page.screenshot por cada frame. 100% deterministic — no dependemos
- * del wall clock del headless Chromium (que en containers sin GPU
- * corre demasiado rápido y el screencast pierde frames).
- *
- * Más lento que screencast (~25-40ms/frame vs streaming) pero garantiza
- * que los 900 frames quedan grabados.
- */
-async function captureFrames(page: Page, framesDir: string): Promise<number> {
-  const totalFrames = (await page.evaluate(() => (window as any).__totalFrames)) as number
-  if (!totalFrames) throw new Error('window.__totalFrames not exposed by animation')
+function buildCumulative(coords: number[][]): number[] {
+  const out = new Array(coords.length).fill(0)
+  for (let i = 1; i < coords.length; i++) {
+    out[i] =
+      out[i - 1] +
+      haversineKm(
+        [coords[i - 1][0], coords[i - 1][1]],
+        [coords[i][0], coords[i][1]],
+      )
+  }
+  return out
+}
 
-  console.log(`[render] capturing ${totalFrames} frames…`)
-  const t0 = Date.now()
+function bbox(coords: number[][]): [number, number, number, number] {
+  let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity
+  for (const [lon, lat] of coords) {
+    if (lon < minLon) minLon = lon
+    if (lat < minLat) minLat = lat
+    if (lon > maxLon) maxLon = lon
+    if (lat > maxLat) maxLat = lat
+  }
+  return [minLon, minLat, maxLon, maxLat]
+}
 
-  let lastSuccessfulFrame = -1
-  for (let f = 0; f < totalFrames; f++) {
-    // Renderizar el frame en la página y esperar a que se aplique.
-    await page.evaluate((frame: number) => {
-      return (window as any).__renderFrame(frame)
-    }, f)
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t ** 3 : 1 - Math.pow(-2 * t + 2, 3) / 2
+}
 
-    const filePath = path.join(framesDir, `frame-${f.toString().padStart(5, '0')}.jpg`)
+function findIndexForKm(cumulative: number[], km: number): number {
+  let lo = 0, hi = cumulative.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (cumulative[mid] < km) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
 
-    // Retry una vez si la screenshot falla por timeout. Software WebGL
-    // a veces tiene picos de latencia en frames que requieren cargar
-    // tiles nuevos y un single timeout no debería matar todo el render.
-    let attempts = 0
-    while (true) {
-      try {
-        await page.screenshot({
-          path: filePath as `${string}.jpg`,
-          type: 'jpeg',
-          quality: 88,
-          omitBackground: false,
-        })
-        break
-      } catch (err: any) {
-        attempts++
-        if (attempts >= 2) {
-          // Si ya capturamos al menos 80% de los frames, cortamos
-          // graceful: encodeamos el video con los frames disponibles
-          // en lugar de fallar el job completo. Las screenshots fallan
-          // típicamente cerca del final por degradación de SwiftShader.
-          const ratio = lastSuccessfulFrame >= 0 ? (lastSuccessfulFrame + 1) / totalFrames : 0
-          if (ratio >= 0.8) {
-            console.warn(
-              `[render] screenshot frame ${f} failed after ${attempts} attempts, ` +
-              `but ${lastSuccessfulFrame + 1}/${totalFrames} frames (${(ratio * 100).toFixed(0)}%) ` +
-              `already captured — proceeding with partial render`,
-            )
-            return lastSuccessfulFrame + 1
-          }
-          console.error(
-            `[render] screenshot frame ${f} failed after ${attempts} attempts ` +
-            `(last successful frame: ${lastSuccessfulFrame}): ${err?.message || err}`,
-          )
-          throw err
-        }
-        console.warn(
-          `[render] screenshot frame ${f} timed out, retrying (attempt ${attempts + 1}/2)`,
-        )
-        await new Promise(r => setTimeout(r, 1_000))
-      }
-    }
-    lastSuccessfulFrame = f
+function interpolate(
+  coords: number[][],
+  cumulative: number[],
+  idx: number,
+  km: number,
+): [number, number] {
+  if (idx === 0) return [coords[0][0], coords[0][1]]
+  const before = cumulative[idx - 1]
+  const after = cumulative[idx]
+  const t = after === before ? 0 : (km - before) / (after - before)
+  const a = coords[idx - 1]
+  const b = coords[idx]
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+}
 
-    if (f > 0 && f % 100 === 0) {
-      const elapsed = (Date.now() - t0) / 1000
-      const fps = f / elapsed
-      console.log(`[render] frame ${f}/${totalFrames} (${fps.toFixed(1)}fps)`)
-      // Forzar GC cada 100 frames para liberar buffers WebGL temporales
-      // y atrasar el context lost del SwiftShader.
-      await page.evaluate(() => {
-        if (typeof (globalThis as any).gc === 'function') {
-          ;(globalThis as any).gc()
-        }
-      }).catch(() => {})
+function shortestArcDelta(from: number, to: number): number {
+  return ((to - from + 540) % 360) - 180
+}
+
+function nearestPathIdx(coords: number[][], lon: number, lat: number): { idx: number; distSq: number } {
+  let bestIdx = 0
+  let bestDist = Infinity
+  for (let i = 0; i < coords.length; i++) {
+    const dlon = coords[i][0] - lon
+    const dlat = coords[i][1] - lat
+    const d = dlon * dlon + dlat * dlat
+    if (d < bestDist) {
+      bestDist = d
+      bestIdx = i
     }
   }
-
-  console.log(`[render] captured all ${totalFrames} frames in ${((Date.now() - t0) / 1000).toFixed(1)}s`)
-  return totalFrames
+  return { idx: bestIdx, distSq: bestDist }
 }
 
-/**
- * Encodea los JPEGs capturados en MP4 H.264 con audio silente. Usamos
- * silent audio porque algunas plataformas (Instagram, TikTok) detectan
- * "video sin audio" y meten ruido o piden re-encode.
- */
-function encodeMp4(framesDir: string, outputPath: string, framesCount: number): Promise<void> {
+// ====== Cache de tiles + style ======
+// Cache persistente en disco para no re-fetchear tiles entre jobs. Usa
+// SHA1 de la URL como nombre de archivo. tmpdir limpia entre reboots
+// del worker pero un mismo proceso de larga vida acumula cache.
+const CACHE_DIR = path.join(os.tmpdir(), 'flyover-tilecache')
+
+function cachePath(url: string): string {
+  const hash = createHash('sha1').update(url).digest('hex')
+  return path.join(CACHE_DIR, hash)
+}
+
+async function cachedFetch(url: string): Promise<Buffer> {
+  const p = cachePath(url)
+  try {
+    return await readFile(p)
+  } catch {
+    // miss
+  }
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const r = await fetch(url)
+    if (r.status === 429) {
+      const wait = 2000 * Math.pow(2, attempt)
+      console.warn(`[tile-cache] 429 on ${url.slice(0, 80)}…, waiting ${wait}ms`)
+      await new Promise((res) => setTimeout(res, wait))
+      continue
+    }
+    if (!r.ok) {
+      if (r.status === 404 || r.status === 403) return Buffer.alloc(0)
+      throw new Error(`HTTP ${r.status} on ${url}`)
+    }
+    const buf = Buffer.from(await r.arrayBuffer())
+    await writeFile(p, buf)
+    return buf
+  }
+  throw new Error(`tile-cache: max retries on ${url}`)
+}
+
+async function fetchStyleJson(): Promise<any> {
+  const buf = await cachedFetch(STYLE_URL)
+  return JSON.parse(buf.toString('utf8'))
+}
+
+// ====== Waypoint selection ======
+interface AnnotatedWaypoint extends WaypointData {
+  pathIdx: number
+  distSq: number
+  tier: number
+}
+
+function selectWaypoints(waypoints: WaypointData[], coords: number[][]): AnnotatedWaypoint[] {
+  const annotated = waypoints
+    .filter((w) => w.photo_url)
+    .map((w): AnnotatedWaypoint => {
+      const near = nearestPathIdx(coords, w.lon, w.lat)
+      return { ...w, pathIdx: near.idx, distSq: near.distSq, tier: kindTier(w.kind) }
+    })
+    .filter((w) => w.distSq < 0.001)
+
+  if (annotated.length === 0) return []
+
+  const totalCoords = coords.length
+  const bucketSize = Math.ceil(totalCoords / MAX_WAYPOINTS)
+  const chosen: AnnotatedWaypoint[] = []
+  const usedKinds = new Map<string, number>()
+
+  for (let b = 0; b < MAX_WAYPOINTS; b++) {
+    const lo = b * bucketSize
+    const hi = Math.min(totalCoords, (b + 1) * bucketSize)
+    const candidates = annotated.filter((w) => w.pathIdx >= lo && w.pathIdx < hi)
+    if (candidates.length === 0) continue
+    candidates.sort((a, b) => {
+      const aPen = (usedKinds.get(a.kind) ?? 0) * 0.5
+      const bPen = (usedKinds.get(b.kind) ?? 0) * 0.5
+      return a.tier + aPen - (b.tier + bPen)
+    })
+    const best = candidates[0]
+    chosen.push(best)
+    usedKinds.set(best.kind, (usedKinds.get(best.kind) ?? 0) + 1)
+  }
+
+  return chosen.sort((a, b) => a.pathIdx - b.pathIdx)
+}
+
+// ====== Waypoint photo prefetch ======
+async function prefetchWaypointPhotos(waypoints: WaypointData[]): Promise<Map<string, Buffer>> {
+  const start = Date.now()
+  const byId = new Map<string, Buffer>()
+  await Promise.all(
+    waypoints
+      .filter((w) => w.photo_url)
+      .map(async (w) => {
+        try {
+          const r = await fetch(w.photo_url!)
+          if (!r.ok) return
+          const raw = Buffer.from(await r.arrayBuffer())
+          const thumb = await sharp(raw)
+            .resize(WAYPOINT_PHOTO_RECT.w, WAYPOINT_PHOTO_RECT.h, { fit: 'cover' })
+            .composite([
+              {
+                input: Buffer.from(
+                  `<svg width="${WAYPOINT_PHOTO_RECT.w}" height="${WAYPOINT_PHOTO_RECT.h}"><rect width="${WAYPOINT_PHOTO_RECT.w}" height="${WAYPOINT_PHOTO_RECT.h}" rx="20" ry="20" fill="white"/></svg>`,
+                ),
+                blend: 'dest-in',
+              },
+            ])
+            .png()
+            .toBuffer()
+          byId.set(w.id, thumb)
+        } catch (e: any) {
+          console.warn(`[photos] waypoint ${w.id} failed: ${e?.message ?? e}`)
+        }
+      }),
+  )
+  console.log(`[render] ${byId.size} fotos cargadas en ${((Date.now() - start) / 1000).toFixed(1)}s`)
+  return byId
+}
+
+// ====== Style builder per frame ======
+function buildStyleWithLayers(
+  baseStyle: any,
+  coordsFull: [number, number][],
+  progressSegment: [number, number][],
+  cursorPos: [number, number] | null,
+  waypointPin: { lon: number; lat: number } | null,
+): any {
+  const s = JSON.parse(JSON.stringify(baseStyle))
+  s.sources['route-full'] = {
+    type: 'geojson',
+    data: { type: 'Feature', geometry: { type: 'LineString', coordinates: coordsFull }, properties: {} },
+  }
+  s.sources['route-progress'] = {
+    type: 'geojson',
+    data: { type: 'Feature', geometry: { type: 'LineString', coordinates: progressSegment }, properties: {} },
+  }
+  if (cursorPos) {
+    s.sources['cursor'] = {
+      type: 'geojson',
+      data: { type: 'Feature', geometry: { type: 'Point', coordinates: cursorPos }, properties: {} },
+    }
+  }
+  if (waypointPin) {
+    s.sources['wp-marker'] = {
+      type: 'geojson',
+      data: {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [waypointPin.lon, waypointPin.lat] },
+        properties: {},
+      },
+    }
+  }
+  s.layers.push(
+    {
+      id: 'route-full-line',
+      type: 'line',
+      source: 'route-full',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#fff', 'line-opacity': 0.22, 'line-width': 4 },
+    },
+    {
+      id: 'route-progress-glow',
+      type: 'line',
+      source: 'route-progress',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#fbbf24', 'line-opacity': 0.5, 'line-width': 18, 'line-blur': 10 },
+    },
+    {
+      id: 'route-progress-line',
+      type: 'line',
+      source: 'route-progress',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#fbbf24', 'line-width': 7 },
+    },
+  )
+  if (waypointPin) {
+    s.layers.push(
+      {
+        id: 'wp-marker-glow',
+        type: 'circle',
+        source: 'wp-marker',
+        paint: { 'circle-radius': 56, 'circle-color': '#06b6d4', 'circle-opacity': 0.35, 'circle-blur': 1.1 },
+      },
+      {
+        id: 'wp-marker-ring',
+        type: 'circle',
+        source: 'wp-marker',
+        paint: { 'circle-radius': 28, 'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-color': '#06b6d4', 'circle-stroke-width': 6 },
+      },
+      {
+        id: 'wp-marker-dot',
+        type: 'circle',
+        source: 'wp-marker',
+        paint: { 'circle-radius': 12, 'circle-color': '#fff', 'circle-stroke-color': '#06b6d4', 'circle-stroke-width': 3 },
+      },
+    )
+  }
+  if (cursorPos) {
+    s.layers.push(
+      {
+        id: 'cursor-glow',
+        type: 'circle',
+        source: 'cursor',
+        paint: { 'circle-radius': 32, 'circle-color': '#fbbf24', 'circle-opacity': 0.4, 'circle-blur': 1 },
+      },
+      {
+        id: 'cursor-dot',
+        type: 'circle',
+        source: 'cursor',
+        paint: { 'circle-radius': 12, 'circle-color': '#fff', 'circle-stroke-color': '#f59e0b', 'circle-stroke-width': 3 },
+      },
+    )
+  }
+  return s
+}
+
+// ====== FFmpeg encode ======
+function encodeMp4(framesDir: string, outputPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    ffmpeg()
-      .input(path.join(framesDir, 'frame-%05d.jpg'))
-      .inputFPS(FPS)
-      .input('anullsrc=r=44100:cl=stereo')
-      .inputFormat('lavfi')
-      .videoCodec('libx264')
-      .audioCodec('aac')
-      .outputOptions([
-        '-pix_fmt yuv420p',
-        '-profile:v high',
-        '-level 4.0',
-        '-movflags +faststart',
-        '-r 30',
-        '-shortest',
-        // Calidad razonable; con CRF 22 obtenemos ~15-25 MB en 30s @1080p
-        '-crf 22',
-        '-preset medium',
-      ])
-      .save(outputPath)
-      .on('end', () => resolve())
-      .on('error', err => reject(err))
+    const ff = spawn('ffmpeg', [
+      '-y',
+      '-framerate', String(FPS),
+      '-i', path.join(framesDir, 'frame-%04d.jpg'),
+      '-f', 'lavfi',
+      '-i', 'anullsrc=r=44100:cl=stereo',
+      '-c:v', 'libx264',
+      '-pix_fmt', 'yuv420p',
+      '-profile:v', 'high',
+      '-movflags', '+faststart',
+      '-c:a', 'aac',
+      '-shortest',
+      '-crf', '22',
+      '-preset', 'medium',
+      outputPath,
+    ])
+    ff.stderr.on('data', () => {})
+    ff.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}`))))
   })
 }
 
+// ====== Main entry ======
 export async function renderFlyover(route: RouteData): Promise<RenderResult> {
-  const t0 = Date.now()
+  const t0 = performance.now()
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'flyover-'))
   const framesDir = path.join(tmpRoot, 'frames')
-  await fs.mkdir(framesDir, { recursive: true })
+  await mkdir(framesDir, { recursive: true })
+  await mkdir(CACHE_DIR, { recursive: true })
   const outputPath = path.join(tmpRoot, 'flyover.mp4')
 
-  const { port, close: closeServer } = await startStaticServer()
-  let browser: Browser | null = null
   try {
-    // VPS Linux con Xvfb + Mesa software rendering. Corremos en modo
-    // "headless: false" (Xvfb provee el display) para que MapLibre
-    // tenga un contexto WebGL real via ANGLE/SwiftShader. Las flags
-    // forzan software rendering (no hay GPU en el droplet).
-    browser = await puppeteer.launch({
-      headless: false,
-      // 10 min por CDP call. Con software WebGL + memoria saturada
-      // un page.evaluate / screenshot puede quedarse colgado mientras
-      // chrome procesa frames pesados. Más generoso > falla espuria.
-      protocolTimeout: 600_000,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--enable-unsafe-swiftshader',
-        '--ignore-gpu-blocklist',
-        '--use-gl=angle',
-        '--use-angle=swiftshader',
-        '--enable-webgl',
-        '--disable-background-timer-throttling',
-        '--disable-renderer-backgrounding',
-        '--disable-backgrounding-occluded-windows',
-        // Exponer gc() al global para que podamos llamar a window.gc()
-        // entre frames y forzar liberación de buffers WebGL temporales
-        // (SwiftShader software rendering los acumula y pierde el
-        // contexto después de ~13 min de captura intensiva).
-        '--js-flags=--expose-gc',
-        `--window-size=${VIDEO_WIDTH},${VIDEO_HEIGHT}`,
-        '--font-render-hinting=none',
-      ],
-      defaultViewport: { width: VIDEO_WIDTH, height: VIDEO_HEIGHT, deviceScaleFactor: 1 },
-    })
-    const page = await browser.newPage()
-    await page.setViewport({ width: VIDEO_WIDTH, height: VIDEO_HEIGHT, deviceScaleFactor: 1 })
+    const coords = route.geojson.coordinates.map((c) => [c[0], c[1], c[2]] as number[])
+    if (coords.length < 2) {
+      return { success: false, error: 'route has too few points' }
+    }
+    const flatCoords: [number, number][] = coords.map((c) => [c[0], c[1]])
+    const cumulative = buildCumulative(coords)
+    const totalKm = cumulative[cumulative.length - 1]
+    const [minLon, minLat, maxLon, maxLat] = bbox(coords)
+    const centerLon = (minLon + maxLon) / 2
+    const centerLat = (minLat + maxLat) / 2
 
-    // Forward de logs del browser al stdout para que en Railway veamos
-    // qué pasa adentro de la página (errores de MapLibre, WebGL, fetch).
-    page.on('console', msg => {
-      const type = msg.type()
-      const text = msg.text()
-      if (type === 'error' || type === 'warn') {
-        console.log(`[browser:${type}] ${text}`)
-      } else if (text.startsWith('[anim]')) {
-        console.log(`[browser] ${text}`)
-      }
-    })
-    page.on('pageerror', (err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err)
-      console.log(`[browser:pageerror] ${message}`)
-    })
-    page.on('requestfailed', req => {
-      const u = req.url()
-      // Solo logueamos los fallos relevantes (tiles, scripts).
-      if (
-        u.includes('maptiler') ||
-        u.includes('unpkg.com') ||
-        u.endsWith('.js') ||
-        u.endsWith('.css')
-      ) {
-        console.log(`[browser:requestfailed] ${u} → ${req.failure()?.errorText}`)
-      }
-    })
-    // Loguear responses 4xx/5xx para diagnosticar tiles o scripts que
-    // devuelven error. Filtramos favicon que es normal 404.
-    page.on('response', resp => {
-      const status = resp.status()
-      const u = resp.url()
-      if (status >= 400 && !u.endsWith('/favicon.ico')) {
-        console.log(`[browser:response ${status}] ${u}`)
-      }
-    })
-
-    // Inyectar la data de la ruta antes de cargar la página.
-    await page.evaluateOnNewDocument(
-      (input: unknown) => {
-        ;(window as any).__flyoverInput = input
-      },
-      { route, maptilerKey: MAPTILER_KEY },
+    console.log(`[render] ${route.title}: ${coords.length} coords, ${totalKm.toFixed(1)} km`)
+    console.log(`[render] pre-fetch fotos waypoints…`)
+    const waypointPhotos = await prefetchWaypointPhotos(route.waypoints)
+    const selectedWaypoints = selectWaypoints(route.waypoints, coords)
+    console.log(
+      `[render] ${selectedWaypoints.length}/${route.waypoints.length} waypoints seleccionados: ` +
+        selectedWaypoints.map((w) => w.kind).join(', '),
     )
 
-    const url = `http://127.0.0.1:${port}/flyover.html`
-    console.log(`[render] navigating to ${url}`)
-    // domcontentloaded en lugar de networkidle0: queremos arrancar el
-    // waitForFunction lo antes posible, no después de que tiles de
-    // MapTiler hayan terminado de llegar (eso puede tomar 50s+ y
-    // descuenta del READY_TIMEOUT). La animación se encarga internamente
-    // de esperar al map.idle antes de setear __flyoverReady.
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+    console.log(`[render] cargando style…`)
+    const baseStyle = await fetchStyleJson()
 
-    // Esperar a que la animación marque ready (terrain cargado, fuentes ok).
-    // Usamos arrow function (no string) — el string form a veces falla
-    // a evaluar window.* en contextos isolated del polling.
-    try {
-      await page.waitForFunction(
-        () => (window as unknown as { __flyoverReady?: boolean }).__flyoverReady === true,
-        { timeout: READY_TIMEOUT_MS, polling: 250 },
-      )
-    } catch (waitErr) {
-      // Capturar estado actual para diagnosticar.
-      const debugPath = path.join(tmpRoot, 'debug-not-ready.jpg')
-      try {
-        await page.screenshot({ path: debugPath as `${string}.jpg`, type: 'jpeg', quality: 80 })
-        console.log(`[render] screenshot saved at ${debugPath}`)
-      } catch {}
-      const state = await page.evaluate(() => ({
-        hasInput: typeof (window as any).__flyoverInput !== 'undefined',
-        ready: (window as any).__flyoverReady,
-        error: (window as any).__flyoverError,
-        mapInit: typeof (window as any).maplibregl !== 'undefined',
-      }))
-      console.log('[render] page state at timeout:', JSON.stringify(state))
-      throw waitErr
+    const memCache = new Map<string, Buffer>()
+    const map = new (mbgl as any).Map({
+      request: (req: any, callback: any) => {
+        const inMem = memCache.get(req.url)
+        if (inMem) return callback(null, { data: inMem })
+        cachedFetch(req.url)
+          .then((buf) => {
+            memCache.set(req.url, buf)
+            callback(null, { data: buf })
+          })
+          .catch((err) => callback(err))
+      },
+      ratio: 1,
+    })
+
+    // ====== Loop de frames ======
+    console.log(`[render] capturing ${TOTAL_FRAMES} frames…`)
+    const tCaptureStart = performance.now()
+    let smoothedBearing: number | null = null
+    const wpShown = new Set<string>()
+    let currentWp: { wp: AnnotatedWaypoint; hideAtFrame: number } | null = null
+
+    function bearingFromLookahead(idxNow: number): number {
+      const ahead = Math.min(coords.length - 1, idxNow + BEARING_LOOKAHEAD)
+      if (ahead <= idxNow) return smoothedBearing ?? 0
+      let dx = 0, dy = 0
+      for (let i = idxNow; i < ahead; i++) {
+        dx += coords[i + 1][0] - coords[i][0]
+        dy += coords[i + 1][1] - coords[i][1]
+      }
+      if (dx === 0 && dy === 0) return smoothedBearing ?? 0
+      return (Math.atan2(dx, dy) * 180) / Math.PI
     }
 
-    const framesCount = await captureFrames(page, framesDir)
+    for (let f = 0; f < TOTAL_FRAMES; f++) {
+      let camera: { center: [number, number]; zoom: number; pitch: number; bearing: number }
+      let progressSegment: [number, number][]
+      let cursorPos: [number, number] | null = null
+      let overlaySvg: string | null = null
 
-    if (framesCount < TOTAL_FRAMES * 0.8) {
-      throw new Error(
-        `captured only ${framesCount}/${TOTAL_FRAMES} frames — animation likely failed`,
-      )
+      if (f < INTRO_END) {
+        const t = easeInOutCubic(f / INTRO_END)
+        camera = {
+          center: [centerLon, centerLat],
+          zoom: 9 + (12.5 - 9) * t,
+          pitch: 25 + (55 - 25) * t,
+          bearing: -20 + 15 * t,
+        }
+        progressSegment = [[coords[0][0], coords[0][1]]]
+        const fade = f < INTRO_END - 8 ? 1 : Math.max(0, 1 - (f - (INTRO_END - 8)) / 8)
+        overlaySvg = svgTitle({
+          eyebrow: route.location ?? 'Patagonia',
+          title: route.title,
+          sub: fmtDateEs(route.date),
+          opacity: fade,
+        })
+      } else if (f < ROUTE_END) {
+        const routeT = (f - INTRO_END) / (ROUTE_END - INTRO_END)
+        const km = totalKm * routeT
+        const idx = findIndexForKm(cumulative, km)
+        const here = interpolate(coords, cumulative, idx, km)
+
+        const target = bearingFromLookahead(idx)
+        if (smoothedBearing == null) {
+          smoothedBearing = target
+        } else {
+          const delta = shortestArcDelta(smoothedBearing, target)
+          const emaStep = delta * BEARING_EMA_ALPHA
+          const capped = Math.sign(emaStep) * Math.min(Math.abs(emaStep), BEARING_MAX_DELTA_PER_FRAME)
+          smoothedBearing = (smoothedBearing + capped + 360) % 360
+        }
+
+        camera = { center: here, zoom: 13, pitch: 55, bearing: smoothedBearing }
+        progressSegment = coords.slice(0, idx + 1).map((c) => [c[0], c[1]])
+        progressSegment.push(here)
+        cursorPos = here
+
+        const alt = coords[idx][2] ?? 0
+        const dPlus = (route.elevation_gain_m ?? 0) * routeT
+
+        if (currentWp && f >= currentWp.hideAtFrame) currentWp = null
+        if (!currentWp) {
+          let best: AnnotatedWaypoint | null = null
+          let bestDist = Infinity
+          for (const w of selectedWaypoints) {
+            if (wpShown.has(w.id)) continue
+            const d = haversineKm([w.lon, w.lat], here)
+            if (d < bestDist) {
+              bestDist = d
+              best = w
+            }
+          }
+          if (best && bestDist < WAYPOINT_MIN_DIST_KM) {
+            wpShown.add(best.id)
+            currentWp = { wp: best, hideAtFrame: f + WAYPOINT_CARD_FRAMES }
+          }
+        }
+
+        const statsSvg = svgStats({ km, alt, dPlus })
+        if (currentWp) {
+          const wp = currentWp.wp
+          const hasPhoto = waypointPhotos.has(wp.id)
+          const wpIndex = selectedWaypoints.findIndex((w) => w.id === wp.id) + 1
+          overlaySvg = stackSvg([
+            statsSvg,
+            svgWaypoint({
+              kindLabel: kindLabelEs(wp.kind),
+              customTitle: wp.title || null,
+              meta: wp.altitude_m != null ? `${Math.round(wp.altitude_m)} m` : '',
+              hasPhoto,
+              index: wpIndex,
+              total: selectedWaypoints.length,
+            }),
+          ])
+        } else {
+          overlaySvg = statsSvg
+        }
+      } else {
+        currentWp = null
+        const t = easeInOutCubic((f - ROUTE_END) / (OUTRO_END - ROUTE_END))
+        camera = {
+          center: [centerLon, centerLat],
+          zoom: 12 - 2 * t,
+          pitch: 55 - 30 * t,
+          bearing: 0,
+        }
+        progressSegment = flatCoords
+        const fade = Math.min(1, t * 2)
+        overlaySvg = svgOutro({
+          title: route.title,
+          location: route.location,
+          date: fmtDateEs(route.date),
+          km: totalKm,
+          dPlus: route.elevation_gain_m ?? 0,
+          time: fmtDurationEs(route.duration_seconds),
+          wps: route.waypoints.length,
+          opacity: fade,
+        })
+      }
+
+      const waypointPin = currentWp ? { lon: currentWp.wp.lon, lat: currentWp.wp.lat } : null
+      const style = buildStyleWithLayers(baseStyle, flatCoords, progressSegment, cursorPos, waypointPin)
+      ;(map as any).load(style)
+
+      const rgba = await new Promise<Buffer>((resolve, reject) => {
+        ;(map as any).render(
+          { ...camera, width: VIDEO_WIDTH, height: VIDEO_HEIGHT },
+          (err: Error | null, buf: Buffer) => (err ? reject(err) : resolve(buf)),
+        )
+      })
+
+      const mapPng = await sharp(rgba, { raw: { width: VIDEO_WIDTH, height: VIDEO_HEIGHT, channels: 4 } })
+        .png()
+        .toBuffer()
+      const layers: sharp.OverlayOptions[] = []
+      if (overlaySvg) layers.push({ input: Buffer.from(overlaySvg), top: 0, left: 0 })
+      if (currentWp && waypointPhotos.has(currentWp.wp.id)) {
+        layers.push({
+          input: waypointPhotos.get(currentWp.wp.id)!,
+          top: WAYPOINT_PHOTO_RECT.y,
+          left: WAYPOINT_PHOTO_RECT.x,
+        })
+      }
+      const composed =
+        layers.length > 0
+          ? await sharp(mapPng).composite(layers).jpeg({ quality: 88 }).toBuffer()
+          : await sharp(mapPng).jpeg({ quality: 88 }).toBuffer()
+
+      await writeFile(path.join(framesDir, `frame-${String(f).padStart(4, '0')}.jpg`), composed)
+
+      if (f > 0 && f % 100 === 0) {
+        const elapsed = (performance.now() - tCaptureStart) / 1000
+        const fps = (f + 1) / elapsed
+        console.log(`[render] frame ${f}/${TOTAL_FRAMES} (${fps.toFixed(1)}fps)`)
+      }
     }
 
-    console.log(`[render] captured ${framesCount} frames in ${(Date.now() - t0) / 1000}s`)
+    ;(map as any).release()
+    console.log(`[render] capture done in ${((performance.now() - tCaptureStart) / 1000).toFixed(1)}s`)
 
-    // Cerrar Chromium + Xvfb ANTES de empezar el encoding. Chromium con
-    // MapLibre cacheado consume ~400-500 MB. En un droplet de 1 GB,
-    // dejarlo vivo durante ffmpeg encoding mete OOM kill. Lo cerramos
-    // explícitamente aquí (el finally es redundante pero seguro).
-    if (browser) {
-      console.log('[render] closing browser before encoding to free memory')
-      await browser.close().catch(() => {})
-      browser = null
-    }
-
-    await encodeMp4(framesDir, outputPath, framesCount)
-    const durationSeconds = (Date.now() - t0) / 1000
-    console.log(`[render] encoded MP4 in ${durationSeconds.toFixed(1)}s total`)
+    console.log(`[render] encoding mp4…`)
+    await encodeMp4(framesDir, outputPath)
+    const durationSeconds = (performance.now() - t0) / 1000
+    console.log(`[render] DONE in ${durationSeconds.toFixed(1)}s → ${outputPath}`)
 
     return {
       success: true,
       output_path: outputPath,
-      frames_count: framesCount,
+      frames_count: TOTAL_FRAMES,
       duration_seconds: durationSeconds,
     }
   } catch (error: any) {
     console.error('[render] failed', error)
-    return { success: false, error: error?.message || String(error) }
-  } finally {
-    if (browser) await browser.close().catch(() => {})
-    closeServer()
-    // Mantenemos tmpRoot por si quien orquesta quiere subir el MP4
-    // todavía. El caller debe llamar cleanup() después de subir.
+    return { success: false, error: error?.message ?? String(error) }
   }
+}
+
+// Stack 2 SVG strings en uno (mismo viewbox)
+function stackSvg(svgs: string[]): string {
+  return `
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920">
+  ${svgs
+    .map((s) =>
+      s.replace(/<\?xml[^>]*\?>/, '').replace(/<svg[^>]*>/, '<g>').replace(/<\/svg>/, '</g>'),
+    )
+    .join('\n')}
+</svg>
+`
 }
 
 export async function cleanupTmp(outputPath: string): Promise<void> {
