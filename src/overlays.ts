@@ -117,18 +117,25 @@ export interface SvgStatsOpts {
   opacity?: number
 }
 
-// Stats UP TOP: la mitad inferior queda libre para la UI de Reels/TikTok
-// (username, caption, botones de like/share, música). Safe area top:
-// ~180-380px desde el borde superior, evitando el notch de iPhones.
+// Stats UP TOP con fondo casi transparente (35% opacidad) + texto con
+// shadow para mantener legibilidad sobre cualquier zona del mapa.
 export function svgStats(opts: SvgStatsOpts): string {
   const { km, alt, dPlus, opacity = 1 } = opts
   return `
 <svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920">
+  <defs>
+    <filter id="ts" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="3"/>
+      <feOffset dx="0" dy="2"/>
+      <feFlood flood-color="black" flood-opacity="0.85"/>
+      <feComposite in2="SourceGraphic" operator="in"/>
+    </filter>
+  </defs>
   <g opacity="${opacity}">
-    <rect x="60" y="200" rx="32" ry="32" width="960" height="160" fill="rgba(0,0,0,0.7)" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
-    <rect x="380" y="240" width="2" height="80" fill="rgba(251,191,36,0.5)"/>
-    <rect x="700" y="240" width="2" height="80" fill="rgba(251,191,36,0.5)"/>
-    <g font-family="Helvetica, Arial, sans-serif" fill="white" text-anchor="middle">
+    <rect x="60" y="200" rx="32" ry="32" width="960" height="160" fill="rgba(0,0,0,0.32)"/>
+    <rect x="380" y="240" width="2" height="80" fill="rgba(251,191,36,0.65)"/>
+    <rect x="700" y="240" width="2" height="80" fill="rgba(251,191,36,0.65)"/>
+    <g font-family="Helvetica, Arial, sans-serif" fill="white" text-anchor="middle" filter="url(#ts)">
       <text x="220" y="285" font-size="72" font-weight="900" font-style="italic">${km.toFixed(1)}</text>
       <text x="220" y="330" font-size="20" font-weight="900" letter-spacing="7" fill="#fbbf24">KM</text>
       <text x="540" y="285" font-size="72" font-weight="900" font-style="italic">${Math.round(alt)}</text>
@@ -170,17 +177,26 @@ export function svgWaypoint(opts: SvgWaypointOpts): string {
   const badgeY = cardY + 40
   return `
 <svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920">
+  <defs>
+    <filter id="tw" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="3"/>
+      <feOffset dx="0" dy="2"/>
+      <feFlood flood-color="black" flood-opacity="0.85"/>
+      <feComposite in2="SourceGraphic" operator="in"/>
+    </filter>
+  </defs>
   <g opacity="${opacity}">
-    <rect x="${cardX}" y="${cardY}" rx="32" ry="32" width="${cardW}" height="${cardH}" fill="rgba(0,0,0,0.82)" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
-    ${hasPhoto ? `<rect x="${photoX}" y="${photoY}" width="${photoSize}" height="${photoSize}" rx="20" ry="20" fill="rgba(40,40,40,1)"/>` : ''}
+    <!-- Background card 40% opaco — el mapa se ve detrás -->
+    <rect x="${cardX}" y="${cardY}" rx="32" ry="32" width="${cardW}" height="${cardH}" fill="rgba(0,0,0,0.4)"/>
+    ${hasPhoto ? `<rect x="${photoX}" y="${photoY}" width="${photoSize}" height="${photoSize}" rx="20" ry="20" fill="rgba(20,20,20,0.4)"/>` : ''}
     ${index != null && total != null
-        ? `<text x="${badgeX}" y="${badgeY + 8}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="900" letter-spacing="3" fill="rgba(251,191,36,0.95)">${String(index).padStart(2, '0')} / ${String(total).padStart(2, '0')}</text>`
+        ? `<text x="${badgeX}" y="${badgeY + 8}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="900" letter-spacing="3" fill="rgba(251,191,36,1)" filter="url(#tw)">${String(index).padStart(2, '0')} / ${String(total).padStart(2, '0')}</text>`
         : ''}
     ${customTitle
-        ? `<text x="${textX}" y="${cardY + 80}" font-family="Helvetica, Arial, sans-serif" font-size="24" font-weight="900" letter-spacing="6" fill="#fbbf24">${escapeXml((kindLabel ?? '').toUpperCase())}</text>
-    <text x="${textX}" y="${cardY + 145}" font-family="Helvetica, Arial, sans-serif" font-size="${titleSize.toFixed(0)}" font-weight="900" fill="white">${escapeXml(headline)}</text>`
-        : `<text x="${textX}" y="${cardY + 130}" font-family="Helvetica, Arial, sans-serif" font-size="${titleSize.toFixed(0)}" font-weight="900" fill="white">${escapeXml(headline)}</text>`}
-    <text x="${textX}" y="${cardY + 195}" font-family="Helvetica, Arial, sans-serif" font-size="28" font-weight="500" fill="rgba(255,255,255,0.7)" letter-spacing="2">${escapeXml(meta ?? '')}</text>
+        ? `<text x="${textX}" y="${cardY + 80}" font-family="Helvetica, Arial, sans-serif" font-size="24" font-weight="900" letter-spacing="6" fill="#fbbf24" filter="url(#tw)">${escapeXml((kindLabel ?? '').toUpperCase())}</text>
+    <text x="${textX}" y="${cardY + 145}" font-family="Helvetica, Arial, sans-serif" font-size="${titleSize.toFixed(0)}" font-weight="900" fill="white" filter="url(#tw)">${escapeXml(headline)}</text>`
+        : `<text x="${textX}" y="${cardY + 130}" font-family="Helvetica, Arial, sans-serif" font-size="${titleSize.toFixed(0)}" font-weight="900" fill="white" filter="url(#tw)">${escapeXml(headline)}</text>`}
+    <text x="${textX}" y="${cardY + 195}" font-family="Helvetica, Arial, sans-serif" font-size="28" font-weight="500" fill="rgba(255,255,255,0.92)" letter-spacing="2" filter="url(#tw)">${escapeXml(meta ?? '')}</text>
   </g>
 </svg>
 `
