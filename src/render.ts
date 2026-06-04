@@ -211,13 +211,23 @@ function selectWaypoints(waypoints: WaypointData[], coords: number[][]): Annotat
 
   const chosen: AnnotatedWaypoint[] = []
 
-  // Pasada 1: forzar prioridades (cumbre, camping). Siempre si existen.
+  // Pasada 1: forzar prioridades (cumbre, camping). Si hay varios del
+  // mismo kind clusterados (ej. trilogía de 3 cumbres seguidas),
+  // mostramos solo uno por cluster — los demás producirían cards
+  // pisadas (cumbre@f274 + cumbre@f275 en Cerro Negro), confunde más
+  // que ayuda. Cluster = waypoints dentro de 5% del largo del path.
+  const clusterGap = Math.floor(coords.length * 0.05)
   for (const kind of PRIORITY_KINDS) {
-    const ofKind = annotated
+    const sorted = annotated
       .filter((w) => w.kind === kind)
       .sort((a, b) => a.pathIdx - b.pathIdx)
-      .slice(0, MAX_PRIORITY_PER_KIND)
-    chosen.push(...ofKind)
+    const picked: AnnotatedWaypoint[] = []
+    for (const w of sorted) {
+      if (picked.length >= MAX_PRIORITY_PER_KIND) break
+      const tooClose = picked.some((p) => Math.abs(p.pathIdx - w.pathIdx) < clusterGap)
+      if (!tooClose) picked.push(w)
+    }
+    chosen.push(...picked)
   }
 
   // Pasada 2: llenar slots restantes distribuyendo por buckets, pero
@@ -400,7 +410,11 @@ function encodeMp4(framesDir: string, outputPath: string): Promise<void> {
       '-movflags', '+faststart',
       '-c:a', 'aac',
       '-shortest',
-      '-crf', '22',
+      // CRF 25: balance peso/calidad para Reels/TikTok/Stories. Con 22
+      // los MP4 quedaban en 50+ MB (pegaba el límite default 50 MB de
+      // Supabase storage). CRF 25 produce ~30-35 MB con calidad
+      // visualmente equivalente para mobile vertical.
+      '-crf', '25',
       '-preset', 'medium',
       outputPath,
     ])
