@@ -457,12 +457,48 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
       ratio: 1,
     })
 
+    // ====== Pre-cálculo de waypoint schedule ======
+    //
+    // Approach proactivo: para cada selectedWaypoint, calcular en qué
+    // frame el cursor pasa por su posición, y agendar el show de la
+    // card desde ese frame por WAYPOINT_CARD_FRAMES. Si dos cards se
+    // solapan, pusheamos la segunda con un gap mínimo.
+    //
+    // Esto garantiza que TODOS los selectedWaypoints (incluyendo
+    // cumbres prioritarias) se muestren — el approach reactivo
+    // anterior podía saltarse cards si el cursor pasaba mientras otra
+    // card ya estaba activa.
+    interface WpScheduleEntry {
+      wp: AnnotatedWaypoint
+      startFrame: number
+      endFrame: number
+    }
+    const wpSchedule: WpScheduleEntry[] = selectedWaypoints
+      .map((w): WpScheduleEntry => {
+        const km = cumulative[w.pathIdx] ?? 0
+        const routeT = Math.min(1, Math.max(0, km / totalKm))
+        const wpFrame = INTRO_END + Math.floor(routeT * (ROUTE_END - INTRO_END))
+        return { wp: w, startFrame: wpFrame, endFrame: wpFrame + WAYPOINT_CARD_FRAMES }
+      })
+      .sort((a, b) => a.startFrame - b.startFrame)
+    // Resolver overlaps: gap mínimo de 20 frames (~0.7s) entre cards
+    for (let i = 1; i < wpSchedule.length; i++) {
+      const prev = wpSchedule[i - 1]
+      const cur = wpSchedule[i]
+      const minStart = prev.endFrame + 20
+      if (cur.startFrame < minStart) {
+        cur.startFrame = minStart
+        cur.endFrame = cur.startFrame + WAYPOINT_CARD_FRAMES
+      }
+    }
+    console.log(
+      `[render] waypoint schedule: ${wpSchedule.map((s) => `${s.wp.kind}@f${s.startFrame}`).join(', ')}`,
+    )
+
     // ====== Loop de frames ======
     console.log(`[render] capturing ${TOTAL_FRAMES} frames…`)
     const tCaptureStart = performance.now()
     let smoothedBearing: number | null = null
-    const wpShown = new Set<string>()
-    let currentWp: { wp: AnnotatedWaypoint; hideAtFrame: number } | null = null
 
     function bearingFromLookahead(idxNow: number): number {
       const ahead = Math.min(coords.length - 1, idxNow + BEARING_LOOKAHEAD)
@@ -481,6 +517,7 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
       let progressSegment: [number, number][]
       let cursorPos: [number, number] | null = null
       let overlaySvg: string | null = null
+      let currentWp: { wp: AnnotatedWaypoint; hideAtFrame: number } | null = null
 
       if (f < INTRO_END) {
         const t = easeInOutCubic(f / INTRO_END)
@@ -522,23 +559,12 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
         const alt = coords[idx][2] ?? 0
         const dPlus = (route.elevation_gain_m ?? 0) * routeT
 
-        if (currentWp && f >= currentWp.hideAtFrame) currentWp = null
-        if (!currentWp) {
-          let best: AnnotatedWaypoint | null = null
-          let bestDist = Infinity
-          for (const w of selectedWaypoints) {
-            if (wpShown.has(w.id)) continue
-            const d = haversineKm([w.lon, w.lat], here)
-            if (d < bestDist) {
-              bestDist = d
-              best = w
-            }
-          }
-          if (best && bestDist < WAYPOINT_MIN_DIST_KM) {
-            wpShown.add(best.id)
-            currentWp = { wp: best, hideAtFrame: f + WAYPOINT_CARD_FRAMES }
-          }
-        }
+        // Mirar el schedule precalculado: ¿hay alguna card activa en
+        // este frame?
+        const activeSchedule = wpSchedule.find(
+          (s) => f >= s.startFrame && f < s.endFrame,
+        )
+        currentWp = activeSchedule ? { wp: activeSchedule.wp, hideAtFrame: activeSchedule.endFrame } : null
 
         const statsSvg = svgStats({ km, alt, dPlus })
         if (currentWp) {
@@ -560,7 +586,7 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
           overlaySvg = statsSvg
         }
       } else {
-        currentWp = null
+        // Outro — currentWp queda null por scope per-frame.
         const t = easeInOutCubic((f - ROUTE_END) / (OUTRO_END - ROUTE_END))
         camera = {
           center: [centerLon, centerLat],
