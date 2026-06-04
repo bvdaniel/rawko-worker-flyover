@@ -473,22 +473,27 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
       startFrame: number
       endFrame: number
     }
+    // Anticipar la card 20 frames antes de que el cursor llegue al
+    // waypoint: visualmente la card aparece justo ANTES de pasar por
+    // el hito, no después.
+    const WP_ANTICIPATE_FRAMES = 20
     const wpSchedule: WpScheduleEntry[] = selectedWaypoints
       .map((w): WpScheduleEntry => {
         const km = cumulative[w.pathIdx] ?? 0
         const routeT = Math.min(1, Math.max(0, km / totalKm))
         const wpFrame = INTRO_END + Math.floor(routeT * (ROUTE_END - INTRO_END))
-        return { wp: w, startFrame: wpFrame, endFrame: wpFrame + WAYPOINT_CARD_FRAMES }
+        const startFrame = Math.max(INTRO_END, wpFrame - WP_ANTICIPATE_FRAMES)
+        return { wp: w, startFrame, endFrame: startFrame + WAYPOINT_CARD_FRAMES }
       })
       .sort((a, b) => a.startFrame - b.startFrame)
-    // Resolver overlaps: gap mínimo de 20 frames (~0.7s) entre cards
+    // Resolver overlaps TRUNCANDO la card anterior (no pushear la
+    // siguiente). Así la card del waypoint actual aparece en el frame
+    // correcto, aunque la anterior dure menos.
     for (let i = 1; i < wpSchedule.length; i++) {
       const prev = wpSchedule[i - 1]
       const cur = wpSchedule[i]
-      const minStart = prev.endFrame + 20
-      if (cur.startFrame < minStart) {
-        cur.startFrame = minStart
-        cur.endFrame = cur.startFrame + WAYPOINT_CARD_FRAMES
+      if (cur.startFrame < prev.endFrame) {
+        prev.endFrame = cur.startFrame
       }
     }
     console.log(
