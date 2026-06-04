@@ -117,21 +117,24 @@ export interface SvgStatsOpts {
   opacity?: number
 }
 
+// Stats UP TOP: la mitad inferior queda libre para la UI de Reels/TikTok
+// (username, caption, botones de like/share, música). Safe area top:
+// ~180-380px desde el borde superior, evitando el notch de iPhones.
 export function svgStats(opts: SvgStatsOpts): string {
   const { km, alt, dPlus, opacity = 1 } = opts
   return `
 <svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920">
   <g opacity="${opacity}">
-    <rect x="60" y="1660" rx="32" ry="32" width="960" height="160" fill="rgba(0,0,0,0.7)" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
-    <rect x="380" y="1700" width="2" height="80" fill="rgba(251,191,36,0.5)"/>
-    <rect x="700" y="1700" width="2" height="80" fill="rgba(251,191,36,0.5)"/>
+    <rect x="60" y="200" rx="32" ry="32" width="960" height="160" fill="rgba(0,0,0,0.7)" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+    <rect x="380" y="240" width="2" height="80" fill="rgba(251,191,36,0.5)"/>
+    <rect x="700" y="240" width="2" height="80" fill="rgba(251,191,36,0.5)"/>
     <g font-family="Helvetica, Arial, sans-serif" fill="white" text-anchor="middle">
-      <text x="220" y="1745" font-size="72" font-weight="900" font-style="italic">${km.toFixed(1)}</text>
-      <text x="220" y="1790" font-size="20" font-weight="900" letter-spacing="7" fill="#fbbf24">KM</text>
-      <text x="540" y="1745" font-size="72" font-weight="900" font-style="italic">${Math.round(alt)}</text>
-      <text x="540" y="1790" font-size="20" font-weight="900" letter-spacing="7" fill="#fbbf24">M ALT</text>
-      <text x="860" y="1745" font-size="72" font-weight="900" font-style="italic">${Math.round(dPlus)}</text>
-      <text x="860" y="1790" font-size="20" font-weight="900" letter-spacing="7" fill="#fbbf24">D+ M</text>
+      <text x="220" y="285" font-size="72" font-weight="900" font-style="italic">${km.toFixed(1)}</text>
+      <text x="220" y="330" font-size="20" font-weight="900" letter-spacing="7" fill="#fbbf24">KM</text>
+      <text x="540" y="285" font-size="72" font-weight="900" font-style="italic">${Math.round(alt)}</text>
+      <text x="540" y="330" font-size="20" font-weight="900" letter-spacing="7" fill="#fbbf24">M ALT</text>
+      <text x="860" y="285" font-size="72" font-weight="900" font-style="italic">${Math.round(dPlus)}</text>
+      <text x="860" y="330" font-size="20" font-weight="900" letter-spacing="7" fill="#fbbf24">M D+</text>
     </g>
   </g>
 </svg>
@@ -150,8 +153,10 @@ export interface SvgWaypointOpts {
 
 export function svgWaypoint(opts: SvgWaypointOpts): string {
   const { kindLabel, customTitle, meta, opacity = 1, hasPhoto = false, index = null, total = null } = opts
+  // Card debajo del bloque de stats (que ahora está a y=200-360).
+  // Posición y=420 deja la mitad inferior libre para UI de Reels.
   const cardX = 60
-  const cardY = 1410
+  const cardY = 420
   const cardW = 960
   const cardH = 230
   const photoSize = 180
@@ -182,8 +187,8 @@ export function svgWaypoint(opts: SvgWaypointOpts): string {
 }
 
 // Posición donde el render componente el thumbnail real del waypoint
-// (matchea el placeholder en svgWaypoint).
-export const WAYPOINT_PHOTO_RECT = { x: 80, y: 1440, w: 180, h: 180 }
+// (matchea el placeholder en svgWaypoint). Card ahora a y=420.
+export const WAYPOINT_PHOTO_RECT = { x: 85, y: 445, w: 180, h: 180 }
 
 export interface SvgOutroOpts {
   title: string
@@ -196,48 +201,61 @@ export interface SvgOutroOpts {
   opacity?: number
 }
 
+// Outro compactado en el tercio superior + brand en el tercio medio.
+// La mitad inferior queda libre para la UI de Reels/TikTok.
 export function svgOutro(opts: SvgOutroOpts): string {
   const { title, location, date, km, dPlus, time, wps, opacity = 1 } = opts
-  const titleSize = fitFontSize(title, 880, 124, 0.6)
+  const titleSize = fitFontSize(title, 880, 110, 0.6)
   const kmStr = km.toFixed(1)
   const dPlusStr = String(Math.round(dPlus))
   const timeStr = String(time ?? '')
   const wpsStr = String(wps ?? '')
   const colMax = 340
-  const kmSize = fitFontSize(kmStr, colMax, 116, 0.55)
-  const dSize = fitFontSize(dPlusStr, colMax, 116, 0.55)
-  const tSize = fitFontSize(timeStr, colMax, 116, 0.55)
-  const wSize = fitFontSize(wpsStr, colMax, 116, 0.55)
+  const kmSize = fitFontSize(kmStr, colMax, 96, 0.55)
+  const dSize = fitFontSize(dPlusStr, colMax, 96, 0.55)
+  const tSize = fitFontSize(timeStr, colMax, 96, 0.55)
+  const wSize = fitFontSize(wpsStr, colMax, 96, 0.55)
   return `
 <svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920">
   <defs>
     <linearGradient id="vignette" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="rgba(0,0,0,0.55)"/>
-      <stop offset="100%" stop-color="rgba(0,0,0,0.92)"/>
+      <stop offset="0%" stop-color="rgba(0,0,0,0.92)"/>
+      <stop offset="65%" stop-color="rgba(0,0,0,0.55)"/>
+      <stop offset="100%" stop-color="rgba(0,0,0,0.3)"/>
     </linearGradient>
   </defs>
   <g opacity="${opacity}">
     <rect x="0" y="0" width="1080" height="1920" fill="url(#vignette)"/>
-    <rect x="280" y="350" width="80" height="2" fill="#fbbf24" opacity="0.85"/>
-    <text x="540" y="360" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" letter-spacing="9" fill="#fbbf24">${escapeXml((location ?? '').toUpperCase())}</text>
-    <rect x="720" y="350" width="80" height="2" fill="#fbbf24" opacity="0.85"/>
-    <text x="540" y="540" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="${titleSize.toFixed(0)}" font-weight="900" font-style="italic" fill="white">${escapeXml(title)}</text>
-    <text x="540" y="610" text-anchor="middle" font-family="Georgia, serif" font-size="32" font-style="italic" fill="rgba(255,255,255,0.85)">${escapeXml(date ?? '')}</text>
+
+    <!-- Top: lugar con líneas decorativas (y=220) -->
+    <rect x="280" y="220" width="80" height="2" fill="#fbbf24" opacity="0.85"/>
+    <text x="540" y="232" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="24" font-weight="800" letter-spacing="9" fill="#fbbf24">${escapeXml((location ?? '').toUpperCase())}</text>
+    <rect x="720" y="220" width="80" height="2" fill="#fbbf24" opacity="0.85"/>
+
+    <!-- Título italic HUGE (y=340) -->
+    <text x="540" y="340" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="${titleSize.toFixed(0)}" font-weight="900" font-style="italic" fill="white">${escapeXml(title)}</text>
+
+    <!-- Date discreto (y=395) -->
+    <text x="540" y="395" text-anchor="middle" font-family="Georgia, serif" font-size="28" font-style="italic" fill="rgba(255,255,255,0.85)">${escapeXml(date ?? '')}</text>
+
+    <!-- Grid 2×2 de stats compacto en y=480-810 -->
     <g font-family="Helvetica, Arial, sans-serif" fill="white" text-anchor="middle">
-      <rect x="540" y="780" width="2" height="380" fill="rgba(251,191,36,0.4)"/>
-      <rect x="160" y="970" width="760" height="2" fill="rgba(251,191,36,0.4)"/>
-      <text x="320" y="880" font-size="${kmSize.toFixed(0)}" font-weight="900" font-style="italic">${kmStr}</text>
-      <text x="320" y="935" font-size="22" font-weight="900" letter-spacing="7" fill="#fbbf24">KILÓMETROS</text>
-      <text x="760" y="880" font-size="${dSize.toFixed(0)}" font-weight="900" font-style="italic">${dPlusStr}</text>
-      <text x="760" y="935" font-size="22" font-weight="900" letter-spacing="7" fill="#fbbf24">D+ METROS</text>
-      <text x="320" y="1080" font-size="${tSize.toFixed(0)}" font-weight="900" font-style="italic">${escapeXml(timeStr)}</text>
-      <text x="320" y="1135" font-size="22" font-weight="900" letter-spacing="7" fill="#fbbf24">TIEMPO</text>
-      <text x="760" y="1080" font-size="${wSize.toFixed(0)}" font-weight="900" font-style="italic">${wpsStr}</text>
-      <text x="760" y="1135" font-size="22" font-weight="900" letter-spacing="7" fill="#fbbf24">HITOS</text>
+      <rect x="540" y="500" width="2" height="300" fill="rgba(251,191,36,0.4)"/>
+      <rect x="160" y="650" width="760" height="2" fill="rgba(251,191,36,0.4)"/>
+      <text x="320" y="580" font-size="${kmSize.toFixed(0)}" font-weight="900" font-style="italic">${kmStr}</text>
+      <text x="320" y="625" font-size="20" font-weight="900" letter-spacing="7" fill="#fbbf24">KILÓMETROS</text>
+      <text x="760" y="580" font-size="${dSize.toFixed(0)}" font-weight="900" font-style="italic">${dPlusStr}</text>
+      <text x="760" y="625" font-size="20" font-weight="900" letter-spacing="7" fill="#fbbf24">D+ METROS</text>
+      <text x="320" y="750" font-size="${tSize.toFixed(0)}" font-weight="900" font-style="italic">${escapeXml(timeStr)}</text>
+      <text x="320" y="795" font-size="20" font-weight="900" letter-spacing="7" fill="#fbbf24">TIEMPO</text>
+      <text x="760" y="750" font-size="${wSize.toFixed(0)}" font-weight="900" font-style="italic">${wpsStr}</text>
+      <text x="760" y="795" font-size="20" font-weight="900" letter-spacing="7" fill="#fbbf24">HITOS</text>
     </g>
-    <rect x="490" y="1430" width="100" height="3" fill="#fbbf24"/>
-    <text x="540" y="1530" text-anchor="middle" font-family="Georgia, serif" font-size="96" font-weight="900" font-style="italic" fill="#f5f1ea">Rawko</text>
-    <text x="540" y="1580" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="22" font-weight="800" letter-spacing="10" fill="rgba(245,241,234,0.65)">RAWKO.IO</text>
+
+    <!-- Brand en y=900 (justo arriba del tercio inferior) -->
+    <rect x="490" y="880" width="100" height="3" fill="#fbbf24"/>
+    <text x="540" y="965" text-anchor="middle" font-family="Georgia, serif" font-size="76" font-weight="900" font-style="italic" fill="#f5f1ea">Rawko</text>
+    <text x="540" y="1010" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="20" font-weight="800" letter-spacing="10" fill="rgba(245,241,234,0.65)">RAWKO.IO</text>
   </g>
 </svg>
 `
