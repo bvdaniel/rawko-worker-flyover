@@ -192,6 +192,12 @@ interface AnnotatedWaypoint extends WaypointData {
   tier: number
 }
 
+// Kinds "imprescindibles": si existen en la ruta, siempre se muestran
+// en el video (hasta MAX_PRIORITY por kind). Una cumbre, un camping,
+// son momentos clave del recorrido que el usuario va a querer ver.
+const PRIORITY_KINDS = ['cumbre', 'camping']
+const MAX_PRIORITY_PER_KIND = 2
+
 function selectWaypoints(waypoints: WaypointData[], coords: number[][]): AnnotatedWaypoint[] {
   const annotated = waypoints
     .filter((w) => w.photo_url)
@@ -203,24 +209,46 @@ function selectWaypoints(waypoints: WaypointData[], coords: number[][]): Annotat
 
   if (annotated.length === 0) return []
 
-  const totalCoords = coords.length
-  const bucketSize = Math.ceil(totalCoords / MAX_WAYPOINTS)
   const chosen: AnnotatedWaypoint[] = []
-  const usedKinds = new Map<string, number>()
 
-  for (let b = 0; b < MAX_WAYPOINTS; b++) {
-    const lo = b * bucketSize
-    const hi = Math.min(totalCoords, (b + 1) * bucketSize)
-    const candidates = annotated.filter((w) => w.pathIdx >= lo && w.pathIdx < hi)
-    if (candidates.length === 0) continue
-    candidates.sort((a, b) => {
-      const aPen = (usedKinds.get(a.kind) ?? 0) * 0.5
-      const bPen = (usedKinds.get(b.kind) ?? 0) * 0.5
-      return a.tier + aPen - (b.tier + bPen)
-    })
-    const best = candidates[0]
-    chosen.push(best)
-    usedKinds.set(best.kind, (usedKinds.get(best.kind) ?? 0) + 1)
+  // Pasada 1: forzar prioridades (cumbre, camping). Siempre si existen.
+  for (const kind of PRIORITY_KINDS) {
+    const ofKind = annotated
+      .filter((w) => w.kind === kind)
+      .sort((a, b) => a.pathIdx - b.pathIdx)
+      .slice(0, MAX_PRIORITY_PER_KIND)
+    chosen.push(...ofKind)
+  }
+
+  // Pasada 2: llenar slots restantes distribuyendo por buckets, pero
+  // ya respetando los slots ocupados por las prioridades de pasada 1.
+  const remainingSlots = Math.max(0, MAX_WAYPOINTS - chosen.length)
+  if (remainingSlots > 0) {
+    const usedIds = new Set(chosen.map((w) => w.id))
+    const totalCoords = coords.length
+    const bucketSize = Math.ceil(totalCoords / MAX_WAYPOINTS)
+    const usedKinds = new Map<string, number>()
+    for (const w of chosen) usedKinds.set(w.kind, (usedKinds.get(w.kind) ?? 0) + 1)
+
+    for (let b = 0; b < MAX_WAYPOINTS && chosen.length < MAX_WAYPOINTS; b++) {
+      const lo = b * bucketSize
+      const hi = Math.min(totalCoords, (b + 1) * bucketSize)
+      // Skip bucket si ya tiene un waypoint prioritario
+      if (chosen.some((w) => w.pathIdx >= lo && w.pathIdx < hi)) continue
+      const candidates = annotated.filter(
+        (w) => w.pathIdx >= lo && w.pathIdx < hi && !usedIds.has(w.id),
+      )
+      if (candidates.length === 0) continue
+      candidates.sort((a, b) => {
+        const aPen = (usedKinds.get(a.kind) ?? 0) * 0.5
+        const bPen = (usedKinds.get(b.kind) ?? 0) * 0.5
+        return a.tier + aPen - (b.tier + bPen)
+      })
+      const best = candidates[0]
+      chosen.push(best)
+      usedIds.add(best.id)
+      usedKinds.set(best.kind, (usedKinds.get(best.kind) ?? 0) + 1)
+    }
   }
 
   return chosen.sort((a, b) => a.pathIdx - b.pathIdx)

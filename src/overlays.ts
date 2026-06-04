@@ -82,7 +82,7 @@ export interface SvgTitleOpts {
 
 export function svgTitle(opts: SvgTitleOpts): string {
   const { eyebrow, title, sub, opacity = 1 } = opts
-  const titleFontSize = fitFontSize(title ?? '', 940, 132, 0.5)
+  const titleFontSize = fitFontSize(title ?? '', 880, 120, 0.6)
   const eyebrowText = escapeXml((eyebrow ?? '').toUpperCase())
   const eyebrowSize = 26
   const eyebrowLetterSpacing = 8
@@ -198,7 +198,7 @@ export interface SvgOutroOpts {
 
 export function svgOutro(opts: SvgOutroOpts): string {
   const { title, location, date, km, dPlus, time, wps, opacity = 1 } = opts
-  const titleSize = fitFontSize(title, 940, 136, 0.5)
+  const titleSize = fitFontSize(title, 880, 124, 0.6)
   const kmStr = km.toFixed(1)
   const dPlusStr = String(Math.round(dPlus))
   const timeStr = String(time ?? '')
