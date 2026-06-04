@@ -39,10 +39,13 @@ const INTRO_END = 60
 const ROUTE_END = 510
 const OUTRO_END = TOTAL_FRAMES
 
-// Cámara cursor-follow
-const BEARING_LOOKAHEAD = 25
-const BEARING_EMA_ALPHA = 0.06
-const BEARING_MAX_DELTA_PER_FRAME = 2.5
+// Cámara cursor-follow. Tuneado para zoom 14.5: lookahead más grande
+// (40 puntos = mira el promedio de la dirección hacia adelante), EMA
+// más lento (0.04), cap más estricto (1.5°/frame) para que pequeños
+// zigzags no shakeen la cámara.
+const BEARING_LOOKAHEAD = 40
+const BEARING_EMA_ALPHA = 0.04
+const BEARING_MAX_DELTA_PER_FRAME = 1.5
 
 // Waypoints
 const MAX_WAYPOINTS = 6
@@ -488,10 +491,18 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
       endFrame: number
     }
     // Anticipar la card 20 frames antes de que el cursor llegue al
-    // waypoint: visualmente la card aparece justo ANTES de pasar por
-    // el hito, no después.
+    // waypoint, y armar el schedule final con resolución inteligente
+    // de overlaps:
+    //   - Si dos cards estarían dentro de MIN_GAP, la más importante
+    //     (cumbre > tier 1 > tier 2 > tier 3) gana — la otra se dropea.
+    //   - Cumbre siempre gana sobre todo lo demás.
     const WP_ANTICIPATE_FRAMES = 20
-    const wpSchedule: WpScheduleEntry[] = selectedWaypoints
+    const MIN_GAP_BETWEEN_CARDS = 60
+    function importance(kind: string): number {
+      if (kind === 'cumbre') return 0
+      return kindTier(kind)
+    }
+    const rawSchedule: WpScheduleEntry[] = selectedWaypoints
       .map((w): WpScheduleEntry => {
         const km = cumulative[w.pathIdx] ?? 0
         const routeT = Math.min(1, Math.max(0, km / totalKm))
@@ -500,15 +511,29 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
         return { wp: w, startFrame, endFrame: startFrame + WAYPOINT_CARD_FRAMES }
       })
       .sort((a, b) => a.startFrame - b.startFrame)
-    // Resolver overlaps TRUNCANDO la card anterior (no pushear la
-    // siguiente). Así la card del waypoint actual aparece en el frame
-    // correcto, aunque la anterior dure menos.
-    for (let i = 1; i < wpSchedule.length; i++) {
-      const prev = wpSchedule[i - 1]
-      const cur = wpSchedule[i]
-      if (cur.startFrame < prev.endFrame) {
-        prev.endFrame = cur.startFrame
+
+    const wpSchedule: WpScheduleEntry[] = []
+    for (const cur of rawSchedule) {
+      const prev = wpSchedule[wpSchedule.length - 1]
+      if (!prev || cur.startFrame >= prev.endFrame + MIN_GAP_BETWEEN_CARDS) {
+        wpSchedule.push(cur)
+        continue
       }
+      const curImp = importance(cur.wp.kind)
+      const prevImp = importance(prev.wp.kind)
+      if (curImp < prevImp) {
+        // cur es más importante, reemplaza prev
+        wpSchedule[wpSchedule.length - 1] = cur
+      } else if (curImp === prevImp) {
+        // Empate: truncamos prev si entra el mínimo
+        const minVisiblePrev = 45
+        if (cur.startFrame - prev.startFrame >= minVisiblePrev) {
+          prev.endFrame = cur.startFrame
+          wpSchedule.push(cur)
+        }
+        // Si no entra ni el mínimo, drop cur
+      }
+      // else: prev gana, drop cur
     }
     console.log(
       `[render] waypoint schedule: ${wpSchedule.map((s) => `${s.wp.kind}@f${s.startFrame}`).join(', ')}`,
