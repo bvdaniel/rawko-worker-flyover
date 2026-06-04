@@ -365,14 +365,13 @@
     function renderFrame(f) {
       frame = f
       if (f < INTRO_END) {
-        // Intro: zoom de 8.5 → 12 con pitch hacia 45, bearing girando 10°.
-        // Termina en los mismos valores que arranca la fase route para
-        // que no haya salto visible en la transición.
+        // Intro: zoom 8.5 → 13, pitch 25 → 60. Termina en los mismos
+        // valores que arranca la fase route (sin salto en la transición).
         const t = easeInOutCubic(f / INTRO_END)
         map.jumpTo({
           center: [centerLon, centerLat],
-          zoom: 8.5 + (12 - 8.5) * t,
-          pitch: 25 + (45 - 25) * t,
+          zoom: 8.5 + (13 - 8.5) * t,
+          pitch: 25 + (60 - 25) * t,
           bearing: -20 + 10 * t,
         })
         if (f > INTRO_END - 12) {
@@ -405,10 +404,11 @@
           properties: {},
         })
 
-        // Cámara sigue al cursor — vista aérea inclinada estilo Strava
-        // 3D Replay. Pitch moderado (45°) + altitud alta (zoom 12) para
-        // ver sobre los picos circundantes sin que bloqueen la vista del
-        // cursor/polyline. Bearing: dirección del último segmento.
+        // Cámara sigue al cursor. Pitch 60° + zoom 13: equilibrio entre
+        // perspectiva 3D y CPU. Pitch 45 + zoom 12 (intento anterior)
+        // mostraba ~10x mas tiles por frame → 42s/frame en software
+        // WebGL. Pitch 60 + zoom 13 reduce el area visible ~5x.
+        // Bearing: dirección del último segmento.
         const lookBack = Math.max(0, idx - 3)
         const prev = coords[lookBack]
         const dx = here[0] - prev[0]
@@ -416,8 +416,8 @@
         const bearing = (Math.atan2(dx, dy) * 180) / Math.PI
         map.jumpTo({
           center: here,
-          zoom: 12,
-          pitch: 45,
+          zoom: 13,
+          pitch: 60,
           bearing,
         })
 
