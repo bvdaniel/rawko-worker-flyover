@@ -30,7 +30,7 @@ apt-get update -y
 apt-get install -y --no-install-recommends \
   curl ca-certificates gnupg git build-essential \
   ffmpeg \
-  libgl1 libegl1 libgles2 \
+  libgl1 libegl1 libgles2 libopengl0 libglx0 \
   libuv1 libcurl4 \
   libpng16-16t64 libjpeg-turbo8 libwebp7 libtiff6 libgif7 \
   libstdc++6 zlib1g
