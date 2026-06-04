@@ -49,7 +49,9 @@ const BEARING_MAX_DELTA_PER_FRAME = 1.5
 
 // Waypoints
 const MAX_WAYPOINTS = 6
-const WAYPOINT_CARD_FRAMES = 90
+// 75 frames = 2.5s. Con 6 waypoints * 75 = 450 frames = exactamente
+// el route phase. Permite que las 6 cards se vean SIN tanto solapamiento.
+const WAYPOINT_CARD_FRAMES = 75
 const WAYPOINT_MIN_DIST_KM = 0.8
 
 const MAPTILER_KEY = process.env.MAPTILER_KEY
@@ -497,7 +499,7 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
     //     (cumbre > tier 1 > tier 2 > tier 3) gana — la otra se dropea.
     //   - Cumbre siempre gana sobre todo lo demás.
     const WP_ANTICIPATE_FRAMES = 20
-    const MIN_GAP_BETWEEN_CARDS = 60
+    const MIN_PREV_VISIBLE = 30
     function importance(kind: string): number {
       if (kind === 'cumbre') return 0
       return kindTier(kind)
@@ -515,25 +517,18 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
     const wpSchedule: WpScheduleEntry[] = []
     for (const cur of rawSchedule) {
       const prev = wpSchedule[wpSchedule.length - 1]
-      if (!prev || cur.startFrame >= prev.endFrame + MIN_GAP_BETWEEN_CARDS) {
+      if (!prev || cur.startFrame >= prev.endFrame) {
         wpSchedule.push(cur)
         continue
       }
-      const curImp = importance(cur.wp.kind)
-      const prevImp = importance(prev.wp.kind)
-      if (curImp < prevImp) {
-        // cur es más importante, reemplaza prev
-        wpSchedule[wpSchedule.length - 1] = cur
-      } else if (curImp === prevImp) {
-        // Empate: truncamos prev si entra el mínimo
-        const minVisiblePrev = 45
-        if (cur.startFrame - prev.startFrame >= minVisiblePrev) {
-          prev.endFrame = cur.startFrame
-          wpSchedule.push(cur)
-        }
-        // Si no entra ni el mínimo, drop cur
+      if (cur.startFrame - prev.startFrame >= MIN_PREV_VISIBLE) {
+        prev.endFrame = cur.startFrame
+        wpSchedule.push(cur)
+        continue
       }
-      // else: prev gana, drop cur
+      if (importance(cur.wp.kind) < importance(prev.wp.kind)) {
+        wpSchedule[wpSchedule.length - 1] = cur
+      }
     }
     console.log(
       `[render] waypoint schedule: ${wpSchedule.map((s) => `${s.wp.kind}@f${s.startFrame}`).join(', ')}`,
