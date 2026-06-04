@@ -542,7 +542,10 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
         const t = easeInOutCubic(f / INTRO_END)
         camera = {
           center: [centerLon, centerLat],
-          zoom: 9 + (12.5 - 9) * t,
+          // Intro: arranca con overview de todo el área (zoom 9) y
+          // termina cerca del primer punto (zoom 13). Pitch sube de
+          // 25 a 55 (overview a inmersivo).
+          zoom: 9 + (13 - 9) * t,
           pitch: 25 + (55 - 25) * t,
           bearing: -20 + 15 * t,
         }
@@ -570,7 +573,10 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
           smoothedBearing = (smoothedBearing + capped + 360) % 360
         }
 
-        camera = { center: here, zoom: 13, pitch: 55, bearing: smoothedBearing }
+        // Zoom 14.5 + pitch 55: cursor protagónico (3-4 km visibles
+        // adelante en lugar de 10+ km), aprovecha más el frame
+        // vertical. Pitch 55 mantiene la perspectiva inmersiva.
+        camera = { center: here, zoom: 14.5, pitch: 55, bearing: smoothedBearing }
         progressSegment = coords.slice(0, idx + 1).map((c) => [c[0], c[1]])
         progressSegment.push(here)
         cursorPos = here
