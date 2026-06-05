@@ -247,10 +247,44 @@
         font-size: 20px; font-weight: 800; letter-spacing: 0.5em;
         color: rgba(245,241,234,0.65);
       }
+
+      /* ===== WATERMARK siempre visible ===== */
+      /* TikTok cubre top hasta ~y=300 (status bar + tabs nav + search).
+         IG cubre top hasta ~y=180 (search bar). Bottom de TikTok/IG
+         arranca caption/buttons en y~1300+. Zone safe vertical:
+         300 < y < 1300 en la mitad izquierda (acción buttons IG/TikTok
+         están a la derecha). Posición: y=1080, x=60 — abajo de stats
+         + waypoint card, antes de bottom UI. */
+      .watermark {
+        position: absolute;
+        top: 1080px; left: 60px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        pointer-events: none;
+        z-index: 10;
+      }
+      .watermark-deco {
+        width: 28px; height: 2px;
+        background: var(--rawko-amber);
+        opacity: 0.85;
+      }
+      .watermark-name {
+        font-family: Georgia, serif;
+        font-size: 26px; font-weight: 900; font-style: italic;
+        color: rgba(245,241,234,0.92);
+        line-height: 1;
+        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
+      }
     </style>
   </head>
   <body>
     <div id="map"></div>
+
+    <div class="watermark">
+      <span class="watermark-deco"></span>
+      <span class="watermark-name">Rawko</span>
+    </div>
 
     <div id="intro" class="overlay intro">
       <div class="intro-eyebrow" id="introEyebrow"></div>

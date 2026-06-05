@@ -445,13 +445,15 @@
           pitch: 55 - 30*t,
           bearing: 0,
         })
-        // Reset polyline a completo y borrar marcador
         map.getSource('route-progress').setData({ type:'Feature', geometry:{ type:'LineString', coordinates: flatCoords }, properties:{} })
 
         setOverlayVisible('intro', false)
         setOverlayVisible('stats', false)
         hideWaypoint()
         setOverlayVisible('outro', f >= ROUTE_END + 4)
+        // Ocultar watermark en outro — el outro ya tiene Rawko grande
+        const wm = document.querySelector('.watermark')
+        if (wm) wm.style.display = 'none'
       }
 
       // Marker del waypoint activo
