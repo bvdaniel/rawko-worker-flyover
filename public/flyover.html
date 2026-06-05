@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rawko Flyover</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+    />
+    <style>
+      :root {
+        --rawko-amber: #fbbf24;
+        --rawko-cream: #f5f1ea;
+      }
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+        font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        color: #fff;
+        background: #000;
+      }
+      #map { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+      .overlay {
+        position: absolute;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 400ms ease;
+      }
+      .overlay.visible { opacity: 1; }
+
+      /* ===== INTRO ===== */
+      .intro {
+        top: 220px; left: 0; right: 0;
+        text-align: center;
+        padding: 0 90px;
+      }
+      .intro-eyebrow {
+        display: flex; align-items: center; justify-content: center; gap: 30px;
+        font-size: 26px; font-weight: 800; letter-spacing: 0.36em;
+        color: var(--rawko-amber);
+        text-transform: uppercase;
+        text-shadow: 0 2px 8px rgba(0,0,0,0.7);
+      }
+      .intro-eyebrow::before, .intro-eyebrow::after {
+        content: ''; height: 2px; width: 80px; background: var(--rawko-amber);
+        opacity: 0.85;
+      }
+      .intro-title {
+        margin: 100px 0 50px;
+        font-size: 132px;
+        font-weight: 900;
+        font-style: italic;
+        line-height: 1;
+        text-shadow: 0 3px 14px rgba(0,0,0,0.75);
+      }
+      .intro-date {
+        font-family: Georgia, serif;
+        font-size: 34px;
+        font-style: italic;
+        color: rgba(255,255,255,0.92);
+        text-shadow: 0 2px 8px rgba(0,0,0,0.7);
+      }
+      .intro-deco {
+        margin: 40px auto 0;
+        width: 100px; height: 3px;
+        background: var(--rawko-amber);
+      }
+
+      /* ===== STATS (route phase, ARRIBA) ===== */
+      .stats {
+        top: 240px;
+        left: 50%;
+        width: 920px;
+        margin-left: -460px;
+        background: rgba(0,0,0,0.4);
+        border-radius: 28px;
+        height: 130px;
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        position: absolute;
+        box-sizing: border-box;
+      }
+      .stats::before, .stats::after {
+        content: '';
+        position: absolute;
+        top: 32px; bottom: 32px;
+        width: 2px;
+        background: rgba(251,191,36,0.7);
+      }
+      .stats::before { left: 33.33%; }
+      .stats::after  { left: 66.67%; }
+      .stat { text-align: center; padding-top: 22px; }
+      .stat-value {
+        font-size: 56px; font-weight: 900; font-style: italic;
+        line-height: 1;
+        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
+      }
+      .stat-label {
+        margin-top: 8px;
+        font-size: 17px; font-weight: 900; letter-spacing: 0.3em;
+        color: var(--rawko-amber);
+        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
+      }
+
+      /* ===== WAYPOINT CARD (route phase, debajo de stats) ===== */
+      .waypoint {
+        top: 400px;
+        left: 50%;
+        width: 920px;
+        margin-left: -460px;
+        background: rgba(0,0,0,0.45);
+        border-radius: 28px;
+        padding: 18px;
+        height: 180px;
+        box-sizing: border-box;
+        display: flex;
+        gap: 22px;
+        position: absolute;
+      }
+      .waypoint-photo {
+        width: 144px; height: 144px;
+        border-radius: 18px;
+        object-fit: cover;
+        background: rgba(20,20,20,0.4);
+        flex-shrink: 0;
+      }
+      .waypoint-body { flex: 1; min-width: 0; position: relative; padding-right: 80px; }
+      .waypoint-eyebrow {
+        font-size: 19px; font-weight: 900; letter-spacing: 0.22em;
+        color: var(--rawko-amber);
+        text-transform: uppercase;
+        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
+        margin-top: 10px;
+      }
+      .waypoint-title {
+        margin-top: 8px;
+        font-size: 40px; font-weight: 900;
+        line-height: 1.05;
+        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
+      }
+      .waypoint-meta {
+        margin-top: 10px;
+        font-size: 22px; font-weight: 500;
+        color: rgba(255,255,255,0.92);
+        letter-spacing: 0.06em;
+        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
+      }
+      .waypoint-badge {
+        position: absolute;
+        top: 6px; right: 0;
+        font-size: 16px; font-weight: 900; letter-spacing: 0.16em;
+        color: var(--rawko-amber);
+        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
+      }
+
+      /* ===== OUTRO ===== */
+      .outro {
+        inset: 0;
+        background: rgba(0,0,0,0.88);
+      }
+      .outro-location {
+        position: absolute; top: 220px; left: 0; right: 0;
+        text-align: center;
+        font-size: 24px; font-weight: 800; letter-spacing: 0.4em;
+        color: var(--rawko-amber);
+        text-transform: uppercase;
+      }
+      .outro-location::before, .outro-location::after {
+        content: ''; display: inline-block;
+        width: 80px; height: 2px;
+        background: var(--rawko-amber);
+        opacity: 0.85;
+        vertical-align: middle;
+        margin: 0 30px;
+      }
+      .outro-title {
+        position: absolute; top: 300px; left: 0; right: 0;
+        text-align: center;
+        padding: 0 90px;
+        font-size: 110px; font-weight: 900; font-style: italic;
+        line-height: 1;
+      }
+      .outro-date {
+        position: absolute; top: 410px; left: 0; right: 0;
+        text-align: center;
+        font-family: Georgia, serif;
+        font-size: 30px; font-style: italic;
+        color: rgba(255,255,255,0.88);
+      }
+      .outro-stats {
+        position: absolute; top: 500px;
+        left: 50%; width: 920px; margin-left: -460px;
+        height: 310px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: 1fr 1fr;
+        column-gap: 80px;
+      }
+      .outro-stats::before {
+        content: ''; position: absolute;
+        left: 50%; top: 30px; bottom: 30px;
+        width: 2px; margin-left: -1px;
+        background: rgba(251,191,36,0.4);
+      }
+      .outro-stats::after {
+        content: ''; position: absolute;
+        left: 60px; right: 60px; top: 50%;
+        height: 2px; background: rgba(251,191,36,0.4);
+      }
+      .outro-stat {
+        text-align: center;
+        padding-top: 18px;
+        position: relative;
+        overflow: hidden;
+      }
+      .outro-stat-value {
+        font-weight: 900; font-style: italic;
+        line-height: 1;
+        white-space: nowrap;
+      }
+      .outro-stat-label {
+        margin-top: 10px;
+        font-size: 20px; font-weight: 900; letter-spacing: 0.32em;
+        color: var(--rawko-amber);
+        white-space: nowrap;
+      }
+      .outro-brand {
+        position: absolute; top: 880px; left: 0; right: 0;
+        text-align: center;
+      }
+      .outro-brand-deco {
+        width: 100px; height: 3px; background: var(--rawko-amber);
+        margin: 0 auto 60px;
+      }
+      .outro-brand-name {
+        font-family: Georgia, serif;
+        font-size: 76px; font-weight: 900; font-style: italic;
+        color: var(--rawko-cream);
+      }
+      .outro-brand-url {
+        margin-top: 14px;
+        font-size: 20px; font-weight: 800; letter-spacing: 0.5em;
+        color: rgba(245,241,234,0.65);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <div id="intro" class="overlay intro">
+      <div class="intro-eyebrow" id="introEyebrow"></div>
+      <h1 class="intro-title" id="introTitle"></h1>
+      <div class="intro-date" id="introDate"></div>
+      <div class="intro-deco"></div>
+    </div>
+
+    <div id="stats" class="overlay stats">
+      <div class="stat">
+        <div class="stat-value" id="statKm">0.0</div>
+        <div class="stat-label">KM</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="statAlt">0</div>
+        <div class="stat-label">M ALT</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="statDPlus">0</div>
+        <div class="stat-label">M D+</div>
+      </div>
+    </div>
+
+    <div id="waypoint" class="overlay waypoint" style="display:none">
+      <img id="wpPhoto" class="waypoint-photo" alt="" />
+      <div class="waypoint-body">
+        <div class="waypoint-badge" id="wpBadge"></div>
+        <div class="waypoint-eyebrow" id="wpEyebrow"></div>
+        <div class="waypoint-title" id="wpTitle"></div>
+        <div class="waypoint-meta" id="wpMeta"></div>
+      </div>
+    </div>
+
+    <div id="outro" class="overlay outro">
+      <div class="outro-location" id="outroLocation"></div>
+      <div class="outro-title" id="outroTitle"></div>
+      <div class="outro-date" id="outroDate"></div>
+      <div class="outro-stats">
+        <div class="outro-stat">
+          <div class="outro-stat-value" id="outroKm">0.0</div>
+          <div class="outro-stat-label">KILÓMETROS</div>
+        </div>
+        <div class="outro-stat">
+          <div class="outro-stat-value" id="outroDPlus">0</div>
+          <div class="outro-stat-label">D+ METROS</div>
+        </div>
+        <div class="outro-stat">
+          <div class="outro-stat-value" id="outroTime">0h</div>
+          <div class="outro-stat-label">TIEMPO</div>
+        </div>
+        <div class="outro-stat">
+          <div class="outro-stat-value" id="outroWps">0</div>
+          <div class="outro-stat-label">HITOS</div>
+        </div>
+      </div>
+      <div class="outro-brand">
+        <div class="outro-brand-deco"></div>
+        <div class="outro-brand-name">Rawko</div>
+        <div class="outro-brand-url">RAWKO.IO</div>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+    <script src="/animation.js"></script>
+  </body>
+</html>
