@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+// @ts-ignore — ws no trae tipos propios; solo lo usamos como WebSocket global
 import ws from 'ws'
 
 // Node < 22 no trae WebSocket nativo y supabase-js lo exige al construir el
