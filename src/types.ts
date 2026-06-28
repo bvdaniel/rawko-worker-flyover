@@ -2,7 +2,8 @@
 
 export interface FlyoverJob {
   id: string
-  experience_id: string
+  experience_id: string | null
+  route_id: string | null
   requested_by: string | null
   status: 'pending' | 'processing' | 'done' | 'failed'
   output_url: string | null
@@ -17,7 +18,7 @@ export interface FlyoverJob {
 
 export interface RouteData {
   route_id: string
-  experience_id: string
+  experience_id: string | null
   title: string
   date: string | null
   location: string | null

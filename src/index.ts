@@ -24,11 +24,12 @@ async function processOne(): Promise<boolean> {
   const job = await claimJob()
   if (!job) return false
 
-  console.log(`[worker] claimed job ${job.id} for experience ${job.experience_id}`)
+  const targetId = job.experience_id ?? job.route_id
+  console.log(`[worker] claimed job ${job.id} for ${job.experience_id ? 'experience' : 'route'} ${targetId}`)
   const t0 = Date.now()
 
   try {
-    const route = await loadRouteData(job.experience_id)
+    const route = await loadRouteData(job)
     if (!route) {
       await markFailed(job.id, 'experience has no route or geojson')
       return true
@@ -40,7 +41,7 @@ async function processOne(): Promise<boolean> {
       return true
     }
 
-    const publicUrl = await uploadFlyover(job.experience_id, job.id, result.output_path)
+    const publicUrl = await uploadFlyover(job, result.output_path)
     await markDone(
       job.id,
       publicUrl,

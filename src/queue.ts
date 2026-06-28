@@ -21,47 +21,85 @@ export async function claimJob(): Promise<FlyoverJob | null> {
 
 /**
  * Carga la data necesaria para renderear el video: geojson de la ruta,
- * waypoints (ordenados cronológicamente), metadata de la experience.
+ * waypoints (ordenados cronológicamente), metadata de la ruta/experience.
+ * Soporta jobs tanto por experience_id como por route_id directo.
  */
-export async function loadRouteData(experienceId: string): Promise<RouteData | null> {
-  const { data: exp, error: expErr } = await supabase
-    .from('experiences')
-    .select('id, title, date, location')
-    .eq('id', experienceId)
-    .maybeSingle()
-  if (expErr) {
-    console.error(`[queue] loadRouteData experiences error for ${experienceId}`, expErr)
-    return null
-  }
-  if (!exp) {
-    console.error(`[queue] loadRouteData: experience ${experienceId} not found`)
-    return null
-  }
+export async function loadRouteData(job: FlyoverJob): Promise<RouteData | null> {
+  const { experience_id, route_id } = job
 
-  // Preferimos la route recorded sobre la planned.
-  const { data: routes, error: routesErr } = await supabase
-    .from('routes')
-    .select(
-      'id, source, route_geojson, route_distance_km, route_elevation_gain_m, ' +
-      'duration_seconds, max_altitude_m',
-    )
-    .eq('experience_id', experienceId)
-  if (routesErr) {
-    console.error(`[queue] loadRouteData routes error for ${experienceId}`, routesErr)
-    return null
-  }
-  if (!routes || routes.length === 0) {
-    console.error(`[queue] loadRouteData: no routes for experience ${experienceId}`)
-    return null
-  }
-  const route =
-    (routes.find(r => (r as any).source === 'recorded') as any) ??
-    (routes.find(r => (r as any).source === 'planned') as any)
-  if (!route?.route_geojson) {
-    console.error(
-      `[queue] loadRouteData: no recorded/planned geojson for ${experienceId}, ` +
-      `sources=${routes.map(r => (r as any).source).join(',')}`,
-    )
+  let route: any = null
+  let title: string | null = null
+  let date: string | null = null
+  let location: string | null = null
+
+  if (route_id) {
+    // Ruta standalone (grabación directa, sin experience).
+    const { data: r, error: rErr } = await supabase
+      .from('routes')
+      .select(
+        'id, source, title, location, recorded_at, route_geojson, route_distance_km, ' +
+        'route_elevation_gain_m, duration_seconds, max_altitude_m',
+      )
+      .eq('id', route_id)
+      .maybeSingle()
+    if (rErr) {
+      console.error(`[queue] loadRouteData route error for ${route_id}`, rErr)
+      return null
+    }
+    if (!r?.route_geojson) {
+      console.error(`[queue] loadRouteData: route ${route_id} not found or has no geojson`)
+      return null
+    }
+    route = r
+    title = (r as any).title
+    location = (r as any).location
+    date = (r as any).recorded_at
+  } else if (experience_id) {
+    // Ruta vinculada a una experience (flujo existente).
+    const { data: exp, error: expErr } = await supabase
+      .from('experiences')
+      .select('id, title, date, location')
+      .eq('id', experience_id)
+      .maybeSingle()
+    if (expErr) {
+      console.error(`[queue] loadRouteData experiences error for ${experience_id}`, expErr)
+      return null
+    }
+    if (!exp) {
+      console.error(`[queue] loadRouteData: experience ${experience_id} not found`)
+      return null
+    }
+    title = (exp as any).title
+    date = (exp as any).date
+    location = (exp as any).location
+
+    const { data: routes, error: routesErr } = await supabase
+      .from('routes')
+      .select(
+        'id, source, route_geojson, route_distance_km, route_elevation_gain_m, ' +
+        'duration_seconds, max_altitude_m',
+      )
+      .eq('experience_id', experience_id)
+    if (routesErr) {
+      console.error(`[queue] loadRouteData routes error for ${experience_id}`, routesErr)
+      return null
+    }
+    if (!routes || routes.length === 0) {
+      console.error(`[queue] loadRouteData: no routes for experience ${experience_id}`)
+      return null
+    }
+    route =
+      (routes.find(r => (r as any).source === 'recorded') as any) ??
+      (routes.find(r => (r as any).source === 'planned') as any)
+    if (!route?.route_geojson) {
+      console.error(
+        `[queue] loadRouteData: no recorded/planned geojson for ${experience_id}, ` +
+        `sources=${routes.map(r => (r as any).source).join(',')}`,
+      )
+      return null
+    }
+  } else {
+    console.error(`[queue] loadRouteData: job ${job.id} has neither experience_id nor route_id`)
     return null
   }
 
@@ -73,10 +111,10 @@ export async function loadRouteData(experienceId: string): Promise<RouteData | n
 
   return {
     route_id: route.id,
-    experience_id: experienceId,
-    title: (exp as any).title,
-    date: (exp as any).date,
-    location: (exp as any).location,
+    experience_id: experience_id,
+    title: title ?? 'Ruta sin título',
+    date,
+    location,
     geojson: route.route_geojson,
     distance_km: route.route_distance_km,
     elevation_gain_m: route.route_elevation_gain_m,
