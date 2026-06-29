@@ -46,7 +46,7 @@ export async function loadRouteData(job: FlyoverJob): Promise<RouteData | null> 
       console.error(`[queue] loadRouteData route error for ${route_id}`, rErr)
       return null
     }
-    if (!r?.route_geojson) {
+    if (!(r as any)?.route_geojson) {
       console.error(`[queue] loadRouteData: route ${route_id} not found or has no geojson`)
       return null
     }
