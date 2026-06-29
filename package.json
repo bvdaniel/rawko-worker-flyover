@@ -13,7 +13,6 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@maplibre/maplibre-gl-native": "^6.4.1",
     "@supabase/supabase-js": "^2.105.4",
     "dotenv": "^17.2.3",
     "fluent-ffmpeg": "^2.1.3",
