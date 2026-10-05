@@ -365,7 +365,7 @@
       el.textContent = text
       const col = 800 // ancho útil por celda
       const ideal = col / (text.length * 0.58)
-      el.style.fontSize = `${Math.min(96, ideal).toFixed(0)}px`
+      el.style.fontSize = `${Math.min(80, ideal).toFixed(0)}px`
     }
     setOutroStat('outroKm', totalKm.toFixed(1))
     setOutroStat('outroDPlus', '+' + Math.round(route.elevation_gain_m || 0))

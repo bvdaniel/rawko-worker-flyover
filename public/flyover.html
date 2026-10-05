@@ -101,24 +101,16 @@
       .intro {
         inset: 0;
       }
-      /* Velo solo tercio inferior: 0% arriba → 75% abajo */
-      .intro-velo {
-        position: absolute;
-        left: 0; right: 0;
-        bottom: 0;
-        height: 640px;
-        background: linear-gradient(to bottom, rgba(12,14,18,0) 0%, rgba(12,14,18,0.4) 100%);
-      }
       .intro-eyebrow {
         position: absolute;
-        top: 240px;
+        top: 340px;
         left: 0; right: 0;
       }
       .intro-title-wrap {
         position: absolute;
         left: 32px;
         right: 32px;
-        top: 600px;
+        top: 480px;
         text-align: center;
       }
       .intro-title {
@@ -133,14 +125,6 @@
         font-size: 32px;
         font-weight: 500;
         color: var(--muted);
-      }
-      .intro-logo {
-        position: absolute;
-        left: 32px;
-        top: 16px;
-        font-size: 28px;
-        color: var(--texto);
-        opacity: 0.4;
       }
 
       /* Círculo de inicio de ruta (posicionado por animation.js) */
@@ -160,8 +144,8 @@
       /* ===== 2. DURANTE (barra inferior) ===== */
       .stats {
         left: 0; right: 0;
-        bottom: 520px;
-        height: 180px;
+        top: 320px;
+        height: 160px;
         background: rgba(12,14,18,0.72);
         display: flex;
         align-items: stretch;
@@ -183,25 +167,25 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 8px;
+        gap: 6px;
       }
       .stat-value {
-        font-size: 72px;
+        font-size: 64px;
         font-weight: 600;
         line-height: 1;
         color: var(--texto);
       }
       .stat-label {
-        font-size: 28px;
+        font-size: 26px;
         font-weight: 500;
         line-height: 1;
         color: var(--muted);
       }
       .stats-logo {
         position: absolute;
-        top: 16px;
+        top: 8px;
         left: 32px;
-        font-size: 28px;
+        font-size: 26px;
         color: var(--texto);
         opacity: 0.5;
       }
@@ -213,14 +197,14 @@
       }
       .outro-eyebrow {
         position: absolute;
-        top: 220px;
+        top: 340px;
         left: 0; right: 0;
       }
       .outro-title-wrap {
         position: absolute;
         left: 32px;
         right: 32px;
-        top: 320px;
+        top: 460px;
         text-align: center;
       }
       .outro-title {
@@ -238,9 +222,9 @@
       }
       .outro-stats {
         position: absolute;
-        top: 600px;
+        top: 620px;
         left: 80px; right: 80px;
-        height: 500px;
+        height: 380px;
         display: grid;
         grid-template-columns: 1fr 1fr;
         grid-template-rows: 1fr 1fr;
@@ -271,30 +255,11 @@
       }
       .outro-stat-label {
         margin-top: 20px;
-        font-size: 30px;
+        font-size: 26px;
         font-weight: 500;
         letter-spacing: 0.02em;
         color: var(--muted);
         white-space: nowrap;
-      }
-      .outro-brand {
-        position: absolute;
-        bottom: 520px;
-        left: 0; right: 0;
-        text-align: center;
-      }
-      .outro-brand-name {
-        font-size: 60px;
-        font-weight: 900;
-        color: var(--texto);
-        line-height: 1;
-      }
-      .outro-brand-url {
-        margin-top: 18px;
-        font-size: 28px;
-        font-weight: 500;
-        letter-spacing: 0.3em;
-        color: var(--muted);
       }
     </style>
   </head>
@@ -306,13 +271,11 @@
 
     <!-- ===== 1. Título ===== -->
     <div id="intro" class="overlay intro">
-      <div class="intro-velo"></div>
       <div class="intro-eyebrow eyebrow" id="introEyebrow"></div>
       <div class="intro-title-wrap">
         <h1 class="intro-title" id="introTitle"></h1>
         <div class="intro-date" id="introDate"></div>
       </div>
-      <div class="intro-logo logo" id="introLogo">Rawko</div>
     </div>
 
     <!-- ===== 2. Durante ===== -->
@@ -357,10 +320,6 @@
           <div class="outro-stat-value" id="outroWps">0</div>
           <div class="outro-stat-label" id="outroWpsLabel">hitos</div>
         </div>
-      </div>
-      <div class="outro-brand">
-        <div class="outro-brand-name logo">Rawko</div>
-        <div class="outro-brand-url">rawko.io</div>
       </div>
     </div>
 
