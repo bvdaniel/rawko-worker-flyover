@@ -45,6 +45,46 @@
     'jul','ago','sep','oct','nov','dic',
   ]
 
+  // Cursor guía por familia de actividad (prototipo emoji).
+  // Cada emoji tiene una orientación natural distinta (Apple). La
+  // dirección se resuelve con flip horizontal (scaleX) según el lado
+  // del track, no con rotación — así el emoji nunca queda "cabeza abajo".
+  const ACTIVITY_EMOJI = {
+    pie: '',          // pie usa el círculo ámbar, no emoji
+    bici: '',         // bici usa el círculo ámbar
+    nieve: '',        // nieve usa el círculo ámbar
+    agua: '🚣',
+    cuerda: '',       // cuerda usa el círculo ámbar
+    cabalgata: '',    // cabalgata usa el círculo ámbar
+    parapente: '🪂',
+    '4x4': '',        // 4x4 usa el círculo ámbar
+  }
+  // Orientación natural de cada emoji: 1 = "mira" a la derecha, -1 = mira
+  // a la izquierda. Se multiplica por el flip del track para que siempre
+  // apunte en la dirección de viaje.
+  const ACTIVITY_EMOJI_BASE_FLIP = {
+    pie: 1,
+    bici: 1,
+    nieve: 1,
+    agua: 1,
+    cuerda: 1,
+    cabalgata: 1,
+    parapente: 1,
+    '4x4': 1,
+  }
+  // Zoom de la fase route por familia (el río necesita acercarse, la
+  // cuerda/nieve son verticales y lentas, el vuelo y el camino más contexto).
+  const ZOOM_BY_FAMILY = {
+    agua: 14.5,
+    parapente: 14.5,
+    cuerda: 15,
+    nieve: 14,
+    bici: 13.5,
+    cabalgata: 13,
+    pie: 13,
+    '4x4': 13.5,
+  }
+
   function deg2rad(d) { return d * Math.PI / 180 }
   function haversineKm(a, b) {
     const R = 6371
@@ -197,12 +237,11 @@
     const centerLon = (mnLon+mxLon)/2
     const centerLat = (mnLat+mxLat)/2
 
-    // Preset de cámara por familia de actividad. Las rutas de agua
-    // (rafting/kayak) necesitan más zoom (menos contexto geográfico)
-    // para que se note que se va por agua y no por tierra.
+    // Preset de cámara por familia de actividad. El río necesita
+    // acercarse (estrecho); el vehículo y el vuelo, más contexto.
     const ROUTE_FAMILY = route.activity_family || ''
     const IS_WATER = ROUTE_FAMILY === 'agua'
-    const ROUTE_PHASE_ZOOM = IS_WATER ? 14.5 : 13.5
+    const ROUTE_PHASE_ZOOM = ZOOM_BY_FAMILY[ROUTE_FAMILY] ?? (IS_WATER ? 14.5 : 13.5)
     const ROUTE_PHASE_PITCH = IS_WATER ? 55 : 50
 
     // Formato "cinta de agua": para rutas de agua dibujamos el trazo
@@ -214,6 +253,15 @@
     const ROUTE_FULL_WIDTH = IS_WATER ? 16 : 4
     const PROGRESS_COLOR = IS_WATER ? '#f0f9ff' : '#fbbf24'
     const PROGRESS_GLOW_COLOR = IS_WATER ? '#38bdf8' : '#fbbf24'
+
+    // Cursor guía por disciplina: emoji (dirección vía flip en renderFrame).
+    // `emoji_override` fuerza un emoji en tests. Si la familia no tiene
+    // emoji (pie), el cursor vuelve al círculo ámbar.
+    const CURSOR_EMOJI = route.emoji_override || ACTIVITY_EMOJI[ROUTE_FAMILY] || ''
+    const USE_EMOJI = CURSOR_EMOJI.length > 0
+    const BASE_FLIP = ACTIVITY_EMOJI_BASE_FLIP[ROUTE_FAMILY] ?? 1
+    const cursorEl = document.getElementById('cursorEmoji')
+    if (cursorEl) cursorEl.textContent = CURSOR_EMOJI
 
     console.log(`[anim] route ${route.title}: ${coords.length} coords, ${totalKm.toFixed(1)} km, family=${ROUTE_FAMILY || '(none)'}, zoom=${ROUTE_PHASE_ZOOM}, pitch=${ROUTE_PHASE_PITCH}`)
 
@@ -311,7 +359,6 @@
     const flatCoords = coords.map(c => [c[0], c[1]])
     map.addSource('route-full', { type: 'geojson', data: { type:'Feature', geometry:{ type:'LineString', coordinates: flatCoords }, properties:{} }})
     map.addSource('route-progress', { type: 'geojson', data: { type:'Feature', geometry:{ type:'LineString', coordinates:[flatCoords[0]] }, properties:{} }})
-    map.addSource('cursor', { type: 'geojson', data: { type:'Feature', geometry:{ type:'Point', coordinates: flatCoords[0] }, properties:{} }})
     map.addSource('wp-marker', { type: 'geojson', data: { type:'FeatureCollection', features: [] }})
 
     map.addLayer({
@@ -341,12 +388,17 @@
       id:'wp-marker-dot', type:'circle', source:'wp-marker',
       paint:{ 'circle-radius':12, 'circle-color':'#fff', 'circle-stroke-color':'#06b6d4', 'circle-stroke-width':3 },
     })
+
+    // Cursor ámbar (usado cuando NO hay emoji, p.ej. familia 'pie').
+    map.addSource('cursor', { type: 'geojson', data: { type:'Feature', geometry:{ type:'Point', coordinates: flatCoords[0] }, properties:{} }})
     map.addLayer({
       id:'cursor-glow', type:'circle', source:'cursor',
+      layout:{ visibility: USE_EMOJI ? 'none' : 'visible' },
       paint:{ 'circle-radius':32, 'circle-color':'#fbbf24', 'circle-opacity':0.4, 'circle-blur':1 },
     })
     map.addLayer({
       id:'cursor-dot', type:'circle', source:'cursor',
+      layout:{ visibility: USE_EMOJI ? 'none' : 'visible' },
       paint:{ 'circle-radius':12, 'circle-color':'#fff', 'circle-stroke-color':'#f59e0b', 'circle-stroke-width':3 },
     })
 
@@ -395,6 +447,7 @@
 
     // ====== Estado ======
     let smoothedBearing = null
+    let cursorSide = 'right'
 
     function bearingFromLookahead(idx) {
       const ahead = Math.min(coords.length-1, idx + BEARING_LOOKAHEAD)
@@ -454,6 +507,7 @@
         setOverlayVisible('intro', f < INTRO_END - 8 ? true : false)
         setOverlayVisible('stats', false)
         setOverlayVisible('outro', false)
+        if (cursorEl) cursorEl.classList.remove('visible')
       } else if (f < ROUTE_END) {
         const routeT = (f - INTRO_END) / (ROUTE_END - INTRO_END)
         const km = totalKm * routeT
@@ -477,7 +531,26 @@
         const seg = coords.slice(0, idx+1).map(c => [c[0], c[1]])
         seg.push(here)
         map.getSource('route-progress').setData({ type:'Feature', geometry:{ type:'LineString', coordinates: seg }, properties:{} })
+
+        // Cursor guía: emoji con flip horizontal según el lado del track,
+        // o círculo ámbar (MapLibre) cuando no hay emoji (familia 'pie').
+        // Histeresis con umbral 2px para evitar jitter en cruces verticales.
         map.getSource('cursor').setData({ type:'Feature', geometry:{ type:'Point', coordinates: here }, properties:{} })
+        if (USE_EMOJI && cursorEl) {
+          const cp = map.project(here)
+          cursorEl.style.left = `${cp.x}px`
+          cursorEl.style.top = `${cp.y}px`
+          const aheadIdx = Math.min(idx + 8, coords.length - 1)
+          const ap = map.project([coords[aheadIdx][0], coords[aheadIdx][1]])
+          const goingLeft = (ap.x - cp.x) < -2
+          if (goingLeft && cursorSide === 'right') cursorSide = 'left'
+          else if (!goingLeft && cursorSide === 'left') cursorSide = 'right'
+          const flip = (cursorSide === 'left' ? -1 : 1) * BASE_FLIP
+          cursorEl.style.transform = `scaleX(${flip})`
+          cursorEl.classList.add('visible')
+        } else if (cursorEl) {
+          cursorEl.classList.remove('visible')
+        }
 
         // Stats (barra inferior) + regla de progreso
         document.getElementById('statKm').textContent = km.toFixed(1)
@@ -505,6 +578,7 @@
         setOverlayVisible('intro', false)
         setOverlayVisible('stats', false)
         setOverlayVisible('outro', f >= ROUTE_END + 4)
+        if (cursorEl) cursorEl.classList.remove('visible')
       }
     }
 

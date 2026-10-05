@@ -141,6 +141,30 @@
       }
       #startDot.visible { opacity: 1; }
 
+      /* Cursor guía (emoji) — posicionado y rotado por animation.js */
+      #cursorEmoji {
+        position: absolute;
+        width: 96px;
+        height: 96px;
+        margin-left: -48px;
+        margin-top: -48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 96px;
+        line-height: 1;
+        opacity: 0;
+        transform-origin: 50% 50%;
+        pointer-events: none;
+        z-index: 5;
+        filter:
+          drop-shadow(0 4px 8px rgba(0,0,0,0.95))
+          drop-shadow(0 0 32px rgba(255,255,255,0.85))
+          drop-shadow(0 0 56px rgba(224,160,26,0.65))
+          drop-shadow(0 0 80px rgba(255,255,255,0.35));
+      }
+      #cursorEmoji.visible { opacity: 1; }
+
       /* ===== 2. DURANTE (barra inferior) ===== */
       .stats {
         left: 0; right: 0;
@@ -268,6 +292,9 @@
 
     <!-- Círculo de inicio de ruta -->
     <div id="startDot"></div>
+
+    <!-- Cursor guía (emoji por disciplina) -->
+    <div id="cursorEmoji"></div>
 
     <!-- ===== 1. Título ===== -->
     <div id="intro" class="overlay intro">
