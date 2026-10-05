@@ -9,18 +9,52 @@
       href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
     />
     <style>
+      /* ===== Tokens ===== */
       :root {
-        --rawko-amber: #fbbf24;
-        --rawko-cream: #f5f1ea;
+        --bg-velo: #0C0E12;
+        --texto: #F2EFE8;
+        --muted: #8F979F;
+        --acento: #E0A01A;
       }
+
+      @font-face {
+        font-family: 'Satoshi';
+        src: url('/fonts/satoshi/Satoshi-Regular.woff2') format('woff2');
+        font-weight: 400;
+        font-style: normal;
+        font-display: block;
+      }
+      @font-face {
+        font-family: 'Satoshi';
+        src: url('/fonts/satoshi/Satoshi-Medium.woff2') format('woff2');
+        font-weight: 500;
+        font-style: normal;
+        font-display: block;
+      }
+      @font-face {
+        font-family: 'Satoshi';
+        src: url('/fonts/satoshi/Satoshi-Bold.woff2') format('woff2');
+        font-weight: 700;
+        font-style: normal;
+        font-display: block;
+      }
+      @font-face {
+        font-family: 'Satoshi';
+        src: url('/fonts/satoshi/Satoshi-Black.woff2') format('woff2');
+        font-weight: 900;
+        font-style: normal;
+        font-display: block;
+      }
+
       html, body {
         margin: 0;
         padding: 0;
         width: 1080px;
         height: 1920px;
         overflow: hidden;
-        font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-        color: #fff;
+        font-family: 'Satoshi', system-ui, -apple-system, sans-serif;
+        font-variant-numeric: tabular-nums;
+        color: var(--texto);
         background: #000;
       }
       #map { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -33,317 +67,300 @@
       }
       .overlay.visible { opacity: 1; }
 
-      /* ===== INTRO ===== */
-      .intro {
-        top: 220px; left: 0; right: 0;
-        text-align: center;
-        padding: 0 90px;
-      }
-      .intro-eyebrow {
-        display: flex; align-items: center; justify-content: center; gap: 30px;
-        font-size: 26px; font-weight: 800; letter-spacing: 0.36em;
-        color: var(--rawko-amber);
-        text-transform: uppercase;
-        text-shadow: 0 2px 8px rgba(0,0,0,0.7);
-      }
-      .intro-eyebrow::before, .intro-eyebrow::after {
-        content: ''; height: 2px; width: 80px; background: var(--rawko-amber);
-        opacity: 0.85;
-      }
-      .intro-title {
-        margin: 100px 0 50px;
-        font-size: 132px;
-        font-weight: 900;
-        font-style: italic;
+      /* ===== Logo (wordmark sans, sin mark ni itálica) ===== */
+      .logo {
+        display: inline-flex;
+        align-items: baseline;
+        font-family: 'Satoshi', system-ui, sans-serif;
+        font-weight: 600;
         line-height: 1;
-        text-shadow: 0 3px 14px rgba(0,0,0,0.75);
-      }
-      .intro-date {
-        font-family: Georgia, serif;
-        font-size: 34px;
-        font-style: italic;
-        color: rgba(255,255,255,0.92);
-        text-shadow: 0 2px 8px rgba(0,0,0,0.7);
-      }
-      .intro-deco {
-        margin: 40px auto 0;
-        width: 100px; height: 3px;
-        background: var(--rawko-amber);
+        letter-spacing: 0.02em;
       }
 
-      /* ===== STATS (route phase, ARRIBA) ===== */
-      .stats {
-        top: 240px;
-        left: 50%;
-        width: 920px;
-        margin-left: -460px;
-        background: rgba(0,0,0,0.4);
-        border-radius: 28px;
-        height: 130px;
-        display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
-        position: absolute;
-        box-sizing: border-box;
-      }
-      .stats::before, .stats::after {
-        content: '';
-        position: absolute;
-        top: 32px; bottom: 32px;
-        width: 2px;
-        background: rgba(251,191,36,0.7);
-      }
-      .stats::before { left: 33.33%; }
-      .stats::after  { left: 66.67%; }
-      .stat { text-align: center; padding-top: 22px; }
-      .stat-value {
-        font-size: 56px; font-weight: 900; font-style: italic;
-        line-height: 1;
-        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
-      }
-      .stat-label {
-        margin-top: 8px;
-        font-size: 17px; font-weight: 900; letter-spacing: 0.3em;
-        color: var(--rawko-amber);
-        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
-      }
-
-      /* ===== WAYPOINT CARD (route phase, debajo de stats) ===== */
-      .waypoint {
-        top: 400px;
-        left: 50%;
-        width: 920px;
-        margin-left: -460px;
-        background: rgba(0,0,0,0.45);
-        border-radius: 28px;
-        padding: 18px;
-        height: 180px;
-        box-sizing: border-box;
+      /* ===== Eyebrow PATAGONIA ===== */
+      .eyebrow {
         display: flex;
-        gap: 22px;
-        position: absolute;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+        font-size: 30px;
+        font-weight: 500;
+        letter-spacing: 0.22em;
+        color: var(--acento);
+        text-transform: uppercase;
       }
-      .waypoint-photo {
-        width: 144px; height: 144px;
-        border-radius: 18px;
-        object-fit: cover;
-        background: rgba(20,20,20,0.4);
+      .eyebrow::before, .eyebrow::after {
+        content: '';
+        width: 56px;
+        height: 2px;
+        background: var(--acento);
         flex-shrink: 0;
       }
-      .waypoint-body { flex: 1; min-width: 0; position: relative; padding-right: 80px; }
-      .waypoint-eyebrow {
-        font-size: 19px; font-weight: 900; letter-spacing: 0.22em;
-        color: var(--rawko-amber);
-        text-transform: uppercase;
-        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
-        margin-top: 10px;
+
+      /* ===== 1. TÍTULO (intro) ===== */
+      .intro {
+        inset: 0;
       }
-      .waypoint-title {
-        margin-top: 8px;
-        font-size: 40px; font-weight: 900;
-        line-height: 1.05;
-        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
-      }
-      .waypoint-meta {
-        margin-top: 10px;
-        font-size: 22px; font-weight: 500;
-        color: rgba(255,255,255,0.92);
-        letter-spacing: 0.06em;
-        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
-      }
-      .waypoint-badge {
+      /* Velo solo tercio inferior: 0% arriba → 75% abajo */
+      .intro-velo {
         position: absolute;
-        top: 6px; right: 0;
-        font-size: 16px; font-weight: 900; letter-spacing: 0.16em;
-        color: var(--rawko-amber);
-        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
+        left: 0; right: 0;
+        bottom: 0;
+        height: 640px;
+        background: linear-gradient(to bottom, rgba(12,14,18,0) 0%, rgba(12,14,18,0.4) 100%);
+      }
+      .intro-eyebrow {
+        position: absolute;
+        top: 240px;
+        left: 0; right: 0;
+      }
+      .intro-title-wrap {
+        position: absolute;
+        left: 32px;
+        right: 32px;
+        top: 600px;
+        text-align: center;
+      }
+      .intro-title {
+        margin: 0;
+        font-size: 60px;
+        font-weight: 600;
+        line-height: 1.1;
+        color: var(--texto);
+      }
+      .intro-date {
+        margin-top: 18px;
+        font-size: 32px;
+        font-weight: 500;
+        color: var(--muted);
+      }
+      .intro-logo {
+        position: absolute;
+        left: 32px;
+        top: 16px;
+        font-size: 28px;
+        color: var(--texto);
+        opacity: 0.4;
       }
 
-      /* ===== OUTRO ===== */
+      /* Círculo de inicio de ruta (posicionado por animation.js) */
+      #startDot {
+        position: absolute;
+        width: 28px;
+        height: 28px;
+        margin-left: -14px;
+        margin-top: -14px;
+        border-radius: 50%;
+        background: var(--acento);
+        opacity: 0;
+        transition: opacity 400ms ease;
+      }
+      #startDot.visible { opacity: 1; }
+
+      /* ===== 2. DURANTE (barra inferior) ===== */
+      .stats {
+        left: 0; right: 0;
+        bottom: 520px;
+        height: 180px;
+        background: rgba(12,14,18,0.72);
+        display: flex;
+        align-items: stretch;
+        position: absolute;
+        box-sizing: border-box;
+      }
+      /* Regla ámbar borde superior: width dinámico = % ruta recorrida */
+      .stats-progress {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 3px;
+        width: 0%;
+        background: var(--acento);
+      }
+      .stat {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+      }
+      .stat-value {
+        font-size: 72px;
+        font-weight: 600;
+        line-height: 1;
+        color: var(--texto);
+      }
+      .stat-label {
+        font-size: 28px;
+        font-weight: 500;
+        line-height: 1;
+        color: var(--muted);
+      }
+      .stats-logo {
+        position: absolute;
+        top: 16px;
+        left: 32px;
+        font-size: 28px;
+        color: var(--texto);
+        opacity: 0.5;
+      }
+
+      /* ===== 3. CIERRE (outro) ===== */
       .outro {
         inset: 0;
-        background: rgba(0,0,0,0.88);
+        background: rgba(12,14,18,0.80);
       }
-      .outro-location {
-        position: absolute; top: 220px; left: 0; right: 0;
+      .outro-eyebrow {
+        position: absolute;
+        top: 220px;
+        left: 0; right: 0;
+      }
+      .outro-title-wrap {
+        position: absolute;
+        left: 32px;
+        right: 32px;
+        top: 320px;
         text-align: center;
-        font-size: 24px; font-weight: 800; letter-spacing: 0.4em;
-        color: var(--rawko-amber);
-        text-transform: uppercase;
-      }
-      .outro-location::before, .outro-location::after {
-        content: ''; display: inline-block;
-        width: 80px; height: 2px;
-        background: var(--rawko-amber);
-        opacity: 0.85;
-        vertical-align: middle;
-        margin: 0 30px;
       }
       .outro-title {
-        position: absolute; top: 300px; left: 0; right: 0;
-        text-align: center;
-        padding: 0 90px;
-        font-size: 110px; font-weight: 900; font-style: italic;
-        line-height: 1;
+        margin: 0;
+        font-size: 56px;
+        font-weight: 600;
+        line-height: 1.15;
+        color: var(--texto);
       }
       .outro-date {
-        position: absolute; top: 410px; left: 0; right: 0;
-        text-align: center;
-        font-family: Georgia, serif;
-        font-size: 30px; font-style: italic;
-        color: rgba(255,255,255,0.88);
+        margin-top: 18px;
+        font-size: 32px;
+        font-weight: 500;
+        color: var(--muted);
       }
       .outro-stats {
-        position: absolute; top: 500px;
-        left: 50%; width: 920px; margin-left: -460px;
-        height: 310px;
+        position: absolute;
+        top: 600px;
+        left: 80px; right: 80px;
+        height: 500px;
         display: grid;
         grid-template-columns: 1fr 1fr;
         grid-template-rows: 1fr 1fr;
-        column-gap: 80px;
       }
+      /* Divisores ámbar al 35% */
       .outro-stats::before {
         content: ''; position: absolute;
-        left: 50%; top: 30px; bottom: 30px;
-        width: 2px; margin-left: -1px;
-        background: rgba(251,191,36,0.4);
+        left: 50%; top: 60px; bottom: 60px;
+        width: 1px; margin-left: -0.5px;
+        background: rgba(224,160,26,0.35);
       }
       .outro-stats::after {
         content: ''; position: absolute;
         left: 60px; right: 60px; top: 50%;
-        height: 2px; background: rgba(251,191,36,0.4);
+        height: 1px; margin-top: -0.5px;
+        background: rgba(224,160,26,0.35);
       }
       .outro-stat {
         text-align: center;
-        padding-top: 18px;
+        padding-top: 40px;
         position: relative;
-        overflow: hidden;
       }
       .outro-stat-value {
-        font-weight: 900; font-style: italic;
+        font-weight: 600;
         line-height: 1;
         white-space: nowrap;
+        color: var(--texto);
       }
       .outro-stat-label {
-        margin-top: 10px;
-        font-size: 20px; font-weight: 900; letter-spacing: 0.32em;
-        color: var(--rawko-amber);
+        margin-top: 20px;
+        font-size: 30px;
+        font-weight: 500;
+        letter-spacing: 0.02em;
+        color: var(--muted);
         white-space: nowrap;
       }
       .outro-brand {
-        position: absolute; top: 880px; left: 0; right: 0;
+        position: absolute;
+        bottom: 520px;
+        left: 0; right: 0;
         text-align: center;
       }
-      .outro-brand-deco {
-        width: 100px; height: 3px; background: var(--rawko-amber);
-        margin: 0 auto 60px;
-      }
       .outro-brand-name {
-        font-family: Georgia, serif;
-        font-size: 76px; font-weight: 900; font-style: italic;
-        color: var(--rawko-cream);
+        font-size: 60px;
+        font-weight: 900;
+        color: var(--texto);
+        line-height: 1;
       }
       .outro-brand-url {
-        margin-top: 14px;
-        font-size: 20px; font-weight: 800; letter-spacing: 0.5em;
-        color: rgba(245,241,234,0.65);
-      }
-
-      /* ===== WATERMARK siempre visible ===== */
-      /* TikTok cubre top hasta ~y=300 (status bar + tabs nav + search).
-         IG cubre top hasta ~y=180 (search bar). Bottom de TikTok/IG
-         arranca caption/buttons en y~1300+. Zone safe vertical:
-         300 < y < 1300 en la mitad izquierda (acción buttons IG/TikTok
-         están a la derecha). Posición: y=1080, x=60 — abajo de stats
-         + waypoint card, antes de bottom UI. */
-      .watermark {
-        position: absolute;
-        top: 1080px; left: 60px;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        pointer-events: none;
-        z-index: 10;
-      }
-      .watermark-deco {
-        width: 28px; height: 2px;
-        background: var(--rawko-amber);
-        opacity: 0.85;
-      }
-      .watermark-name {
-        font-family: Georgia, serif;
-        font-size: 26px; font-weight: 900; font-style: italic;
-        color: rgba(245,241,234,0.92);
-        line-height: 1;
-        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
+        margin-top: 18px;
+        font-size: 28px;
+        font-weight: 500;
+        letter-spacing: 0.3em;
+        color: var(--muted);
       }
     </style>
   </head>
   <body>
     <div id="map"></div>
 
-    <div class="watermark">
-      <span class="watermark-deco"></span>
-      <span class="watermark-name">Rawko</span>
-    </div>
+    <!-- Círculo de inicio de ruta -->
+    <div id="startDot"></div>
 
+    <!-- ===== 1. Título ===== -->
     <div id="intro" class="overlay intro">
-      <div class="intro-eyebrow" id="introEyebrow"></div>
-      <h1 class="intro-title" id="introTitle"></h1>
-      <div class="intro-date" id="introDate"></div>
-      <div class="intro-deco"></div>
+      <div class="intro-velo"></div>
+      <div class="intro-eyebrow eyebrow" id="introEyebrow"></div>
+      <div class="intro-title-wrap">
+        <h1 class="intro-title" id="introTitle"></h1>
+        <div class="intro-date" id="introDate"></div>
+      </div>
+      <div class="intro-logo logo" id="introLogo">Rawko</div>
     </div>
 
+    <!-- ===== 2. Durante ===== -->
     <div id="stats" class="overlay stats">
+      <div class="stats-progress" id="statsProgress"></div>
+      <div class="stats-logo logo">Rawko</div>
       <div class="stat">
         <div class="stat-value" id="statKm">0.0</div>
-        <div class="stat-label">KM</div>
+        <div class="stat-label">km</div>
       </div>
       <div class="stat">
         <div class="stat-value" id="statAlt">0</div>
-        <div class="stat-label">M ALT</div>
+        <div class="stat-label">m</div>
       </div>
       <div class="stat">
-        <div class="stat-value" id="statDPlus">0</div>
-        <div class="stat-label">M D+</div>
+        <div class="stat-value" id="statDPlus">+0</div>
+        <div class="stat-label">m</div>
       </div>
     </div>
 
-    <div id="waypoint" class="overlay waypoint" style="display:none">
-      <img id="wpPhoto" class="waypoint-photo" alt="" />
-      <div class="waypoint-body">
-        <div class="waypoint-badge" id="wpBadge"></div>
-        <div class="waypoint-eyebrow" id="wpEyebrow"></div>
-        <div class="waypoint-title" id="wpTitle"></div>
-        <div class="waypoint-meta" id="wpMeta"></div>
-      </div>
-    </div>
-
+    <!-- ===== 3. Cierre ===== -->
     <div id="outro" class="overlay outro">
-      <div class="outro-location" id="outroLocation"></div>
-      <div class="outro-title" id="outroTitle"></div>
-      <div class="outro-date" id="outroDate"></div>
-      <div class="outro-stats">
+      <div class="outro-eyebrow eyebrow" id="outroEyebrow"></div>
+      <div class="outro-title-wrap">
+        <h1 class="outro-title" id="outroTitle"></h1>
+        <div class="outro-date" id="outroDate"></div>
+      </div>
+      <div class="outro-stats" id="outroStats">
         <div class="outro-stat">
           <div class="outro-stat-value" id="outroKm">0.0</div>
-          <div class="outro-stat-label">KILÓMETROS</div>
+          <div class="outro-stat-label">km</div>
         </div>
         <div class="outro-stat">
           <div class="outro-stat-value" id="outroDPlus">0</div>
-          <div class="outro-stat-label">D+ METROS</div>
+          <div class="outro-stat-label">m</div>
         </div>
         <div class="outro-stat">
           <div class="outro-stat-value" id="outroTime">0h</div>
-          <div class="outro-stat-label">TIEMPO</div>
+          <div class="outro-stat-label">tiempo</div>
         </div>
-        <div class="outro-stat">
+        <div class="outro-stat" id="outroWpsCell">
           <div class="outro-stat-value" id="outroWps">0</div>
-          <div class="outro-stat-label">HITOS</div>
+          <div class="outro-stat-label" id="outroWpsLabel">hitos</div>
         </div>
       </div>
       <div class="outro-brand">
-        <div class="outro-brand-deco"></div>
-        <div class="outro-brand-name">Rawko</div>
-        <div class="outro-brand-url">RAWKO.IO</div>
+        <div class="outro-brand-name logo">Rawko</div>
+        <div class="outro-brand-url">rawko.io</div>
       </div>
     </div>
 

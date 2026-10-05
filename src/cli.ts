@@ -15,7 +15,7 @@ import type { RouteData } from './types.js'
 async function loadByTitle(title: string): Promise<RouteData | null> {
   const { data: exp } = await supabase
     .from('experiences')
-    .select('id, title, date, location')
+    .select('id, title, date, location, activity_family')
     .ilike('title', `%${title}%`)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -26,7 +26,7 @@ async function loadByTitle(title: string): Promise<RouteData | null> {
     .from('routes')
     .select(
       'id, source, route_geojson, route_distance_km, route_elevation_gain_m, ' +
-        'duration_seconds, max_altitude_m',
+        'duration_seconds, max_altitude_m, activity_family',
     )
     .eq('experience_id', (exp as any).id)
   if (!routes || routes.length === 0) return null
@@ -53,6 +53,7 @@ async function loadByTitle(title: string): Promise<RouteData | null> {
     elevation_gain_m: route.route_elevation_gain_m,
     duration_seconds: route.duration_seconds,
     max_altitude_m: route.max_altitude_m,
+    activity_family: (route as any).activity_family ?? (exp as any).activity_family ?? null,
     waypoints: (waypointRows ?? []).map((w: any) => ({
       id: w.id,
       kind: w.kind,

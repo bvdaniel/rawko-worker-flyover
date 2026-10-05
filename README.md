@@ -38,15 +38,28 @@ Ver `.env.example`. Requeridas:
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `MAPTILER_KEY`
 
-## Dev local
+## Dev local (Mac)
+
+v0.3 usa Chrome headless + WebGL para el terrain DEM 3D. Requiere:
+
+1. Una Mac con GPU (Metal). En droplets Linux sin GPU, el WebGL cae a
+   SwiftShader por CPU y los renders se vuelven muy lentos.
+2. Chrome para Testing instalado en el cache de Puppeteer:
 
 ```bash
 npm install
+npx puppeteer browsers install chrome   # ~150 MB, una sola vez
 cp .env.example .env.local
 # llenar las keys
-npm run dev                              # arranca el loop (poll de la cola)
+npm run build && npm start               # arranca el loop (poll de la cola)
 npm run test:single -- <experience_id>   # renderiza una sola sin tocar cola
 ```
+
+> Si el worker arranca y falla con "Could not find Chrome (ver. …)", es
+> que falta correr `npx puppeteer browsers install chrome`. No es un
+> problema de la ruta — el worker ahora lo detecta, hace backoff progresivo
+> (10min → 30min → 1h → 2h → 4h) y deja el job en `processing` sin quemar
+> reintentos hasta que el binario aparezca.
 
 ## Deploy en Railway
 

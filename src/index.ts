@@ -1,6 +1,6 @@
 import 'dotenv/config'
 import { claimJob, loadRouteData, markDone, markFailed } from './queue.js'
-import { renderFlyover, cleanupTmp } from './render.js'
+import { renderFlyover, cleanupTmp, InfraChromeMissingError } from './render.js'
 import { uploadFlyover } from './upload.js'
 
 // Forzar line-buffered stdout para que los logs aparezcan en journald
@@ -16,9 +16,24 @@ if ((process.stderr as any)._handle?.setBlocking) {
 
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 30_000)
 
+// Backoff progresivo para errores de infraestructura (Chrome faltante,
+// red a Supabase caída). No queremos quemar los 3 reintentos del job ni
+// loopear a 30s: 10min → 30min → 1h → 2h → 4h (cap).
+const INFRA_BACKOFF_MS = [
+  10 * 60_000,
+  30 * 60_000,
+  60 * 60_000,
+  120 * 60_000,
+  240 * 60_000,
+]
+
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
+
+// Estado de backoff de infra a nivel worker. Se resetea en cuanto
+// cualquier cosa (claim o render) tiene éxito.
+let infraBackoffIdx = 0
 
 async function processOne(): Promise<boolean> {
   const job = await claimJob()
@@ -41,6 +56,9 @@ async function processOne(): Promise<boolean> {
       return true
     }
 
+    // Chrome levantó y renderizó → infra sana, resetear backoff.
+    infraBackoffIdx = 0
+
     const publicUrl = await uploadFlyover(job, result.output_path)
     await markDone(
       job.id,
@@ -54,6 +72,21 @@ async function processOne(): Promise<boolean> {
       `[worker] job ${job.id} done in ${((Date.now() - t0) / 1000).toFixed(1)}s → ${publicUrl}`,
     )
   } catch (error: any) {
+    if (error instanceof InfraChromeMissingError) {
+      // Infra local rota, no culpa de la ruta. NO consumir reintentos:
+      // dejamos el job en 'processing', hacemos backoff progresivo y el
+      // próximo poll lo vuelve a intentar con Chrome ya arreglado.
+      const wait = INFRA_BACKOFF_MS[Math.min(infraBackoffIdx, INFRA_BACKOFF_MS.length - 1)]
+      console.error(
+        `[worker] chrome missing for job ${job.id} — backoff ${Math.round(wait / 60_000)}min (infra attempt ${infraBackoffIdx + 1}). Job queda en processing.`,
+      )
+      infraBackoffIdx++
+      await sleep(wait)
+      return true
+    }
+    // Cualquier otro error (de la ruta o lógica) consume un reintento
+    // normal vía complete_flyover_job.
+    infraBackoffIdx = 0
     console.error(`[worker] job ${job.id} failed`, error)
     await markFailed(job.id, error?.message ?? String(error))
   }
@@ -85,7 +118,8 @@ async function main() {
     } catch (error) {
       consecutiveErrors++
       console.error('[worker] loop error', error)
-      // Backoff exponencial si los errores siguen viniendo.
+      // Backoff exponencial si los errores siguen viniendo (errores de
+      // red en claimJob() ahora sí llegan acá vía re-throw).
       const wait = Math.min(60_000, 1000 * Math.pow(2, consecutiveErrors))
       await sleep(wait)
     }

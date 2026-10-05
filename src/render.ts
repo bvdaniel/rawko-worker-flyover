@@ -23,12 +23,24 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const VIDEO_WIDTH = 1080
 const VIDEO_HEIGHT = 1920
 const FPS = 30
-const TOTAL_FRAMES = 600
+const TOTAL_FRAMES = 630
 const READY_TIMEOUT_MS = 60_000
 
 const MAPTILER_KEY = process.env.MAPTILER_KEY
 if (!MAPTILER_KEY) {
   console.warn('[render] MAPTILER_KEY no set — tiles van a fallar')
+}
+
+/**
+ * Error de infraestructura local: Chrome no está instalado / el binario
+ * no se encuentra. No es culpa de la ruta — NO debe consumir reintentos
+ * del job. El caller (index.ts) hace backoff progresivo y reintenta.
+ */
+export class InfraChromeMissingError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'InfraChromeMissingError'
+  }
 }
 
 // Servidor local HTTP para que Chrome cargue los assets via http://
@@ -53,6 +65,9 @@ function startStaticServer(): Promise<{ port: number; close: () => void }> {
           ext === '.html' ? 'text/html; charset=utf-8' :
           ext === '.js' ? 'application/javascript' :
           ext === '.css' ? 'text/css' :
+          ext === '.woff2' ? 'font/woff2' :
+          ext === '.woff' ? 'font/woff' :
+          ext === '.svg' ? 'image/svg+xml' :
           'application/octet-stream'
         res.writeHead(200, { 'Content-Type': contentType }).end(data)
       } catch {
@@ -132,19 +147,27 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
 
   try {
     console.log(`[render] launching chrome…`)
-    browser = await puppeteer.launch({
-      headless: true,
-      defaultViewport: { width: VIDEO_WIDTH, height: VIDEO_HEIGHT, deviceScaleFactor: 1 },
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        `--window-size=${VIDEO_WIDTH},${VIDEO_HEIGHT}`,
-        '--ignore-gpu-blocklist',
-        '--enable-webgl',
-        '--font-render-hinting=none',
-      ],
-      protocolTimeout: 600_000,
-    })
+    try {
+      browser = await puppeteer.launch({
+        headless: true,
+        defaultViewport: { width: VIDEO_WIDTH, height: VIDEO_HEIGHT, deviceScaleFactor: 1 },
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          `--window-size=${VIDEO_WIDTH},${VIDEO_HEIGHT}`,
+          '--ignore-gpu-blocklist',
+          '--enable-webgl',
+          '--font-render-hinting=none',
+        ],
+        protocolTimeout: 600_000,
+      })
+    } catch (e: unknown) {
+      const m = String((e as any)?.message ?? e)
+      if (/could not find chrome|no such file|cannot find chrome|executablePath|browser.*not.*found|chrome.*not.*found/i.test(m)) {
+        throw new InfraChromeMissingError(m)
+      }
+      throw e
+    }
     const page = await browser.newPage()
     await page.setViewport({ width: VIDEO_WIDTH, height: VIDEO_HEIGHT, deviceScaleFactor: 1 })
 
@@ -157,6 +180,18 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
     page.on('pageerror', (err: unknown) => {
       const m = err instanceof Error ? err.message : String(err)
       console.log(`[browser:pageerror] ${m}`)
+    })
+    // Instrumentación de red: sin esto no sabemos QUÉ recurso 404ea y
+    // los "map load timeout" quedan sin diagnóstico. Cada respuesta >=400
+    // y cada request fallido se loguea con la URL completa.
+    page.on('response', (res) => {
+      const status = res.status()
+      if (status >= 400) {
+        console.log(`[browser:net:${status}] ${res.url()}`)
+      }
+    })
+    page.on('requestfailed', (req) => {
+      console.log(`[browser:net:failed] ${req.url()} (${req.failure()?.errorText ?? 'unknown'})`)
     })
 
     await page.evaluateOnNewDocument(

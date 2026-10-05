@@ -6,10 +6,10 @@
 // determinísticamente.
 
 (function () {
-  const TOTAL_FRAMES = 600
+  const TOTAL_FRAMES = 630
   const FPS = 30
-  const INTRO_END = 60   // 2s intro
-  const ROUTE_END = 510  // 15s recorrido
+  const INTRO_END = 90   // 3s intro (caída desde órbita más pausada)
+  const ROUTE_END = 540  // 15s recorrido
   const OUTRO_END = TOTAL_FRAMES // 3s outro
 
   // Cámara
@@ -40,6 +40,10 @@
     'enero','febrero','marzo','abril','mayo','junio',
     'julio','agosto','septiembre','octubre','noviembre','diciembre',
   ]
+  const MONTHS_ES_SHORT = [
+    'ene','feb','mar','abr','may','jun',
+    'jul','ago','sep','oct','nov','dic',
+  ]
 
   function deg2rad(d) { return d * Math.PI / 180 }
   function haversineKm(a, b) {
@@ -63,6 +67,15 @@
     return [mnLon, mnLat, mxLon, mxLat]
   }
   function easeInOutCubic(t) { return t<0.5 ? 4*t**3 : 1 - Math.pow(-2*t+2, 3)/2 }
+  // Easing "Google Earth": arranca rápido (whoosh) y decelera suave al
+  // llegar. Da el efecto de "fly to" desde órbita.
+  function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3) }
+  // Un poco más agresivo que easeOutCubic: vuela más rápido al inicio y
+  // se asienta con cushioning extra (más parecido a Google Earth real).
+  function easeOutQuart(t) { return 1 - Math.pow(1 - t, 4) }
+  // Para el outro: arranca lento (lingera sobre la ruta) y acelera al
+  // salir a órbita.
+  function easeInCubic(t) { return t ** 3 }
   function findIdxForKm(cum, km) {
     let lo=0, hi=cum.length-1
     while (lo < hi) { const m = (lo+hi)>>1; cum[m]<km ? lo=m+1 : hi=m }
@@ -86,7 +99,7 @@
   function fmtDate(iso) {
     if (!iso) return ''
     const d = new Date(iso)
-    return `${d.getUTCDate()} de ${MONTHS_ES[d.getUTCMonth()]} de ${d.getUTCFullYear()}`
+    return `${d.getUTCDate()} ${MONTHS_ES_SHORT[d.getUTCMonth()]} ${d.getUTCFullYear()}`
   }
   function fmtDuration(s) {
     if (!s || s<=0) return '—'
@@ -99,7 +112,7 @@
   // ====== Waypoint selection (mismo algoritmo que render.ts maplibre) ======
   function selectWaypoints(waypoints, coords) {
     const annotated = waypoints
-      .filter(w => w.photo_url)
+      .filter(w => w.photo_url || (KIND_TIERS[w.kind] || 3) <= 2)
       .map(w => {
         const n = nearestPathIdx(coords, w.lon, w.lat)
         return { ...w, pathIdx: n.idx, distSq: n.distSq, tier: KIND_TIERS[w.kind] || 3 }
@@ -183,40 +196,108 @@
     const [mnLon, mnLat, mxLon, mxLat] = bbox(coords)
     const centerLon = (mnLon+mxLon)/2
     const centerLat = (mnLat+mxLat)/2
-    console.log(`[anim] route ${route.title}: ${coords.length} coords, ${totalKm.toFixed(1)} km`)
 
-    const selected = selectWaypoints(route.waypoints, coords)
-    const schedule = buildSchedule(selected, coords, cumulative, totalKm)
-    console.log(`[anim] schedule: ${schedule.map(s => `${s.wp.kind}@${s.startFrame}-${s.endFrame}`).join(', ')}`)
+    // Preset de cámara por familia de actividad. Las rutas de agua
+    // (rafting/kayak) necesitan más zoom (menos contexto geográfico)
+    // para que se note que se va por agua y no por tierra.
+    const ROUTE_FAMILY = route.activity_family || ''
+    const IS_WATER = ROUTE_FAMILY === 'agua'
+    const ROUTE_PHASE_ZOOM = IS_WATER ? 14.5 : 13.5
+    const ROUTE_PHASE_PITCH = IS_WATER ? 55 : 50
+
+    // Formato "cinta de agua": para rutas de agua dibujamos el trazo
+    // completo como una banda azul (el río) en vez de una línea blanca
+    // fina. El progreso se dibuja encima como espuma/blanca. Así el agua
+    // se lee aunque el río real sea angosto en el satélite.
+    const ROUTE_FULL_COLOR = IS_WATER ? '#0ea5e9' : '#ffffff'
+    const ROUTE_FULL_OPACITY = IS_WATER ? 0.55 : 0.22
+    const ROUTE_FULL_WIDTH = IS_WATER ? 16 : 4
+    const PROGRESS_COLOR = IS_WATER ? '#f0f9ff' : '#fbbf24'
+    const PROGRESS_GLOW_COLOR = IS_WATER ? '#38bdf8' : '#fbbf24'
+
+    console.log(`[anim] route ${route.title}: ${coords.length} coords, ${totalKm.toFixed(1)} km, family=${ROUTE_FAMILY || '(none)'}, zoom=${ROUTE_PHASE_ZOOM}, pitch=${ROUTE_PHASE_PITCH}`)
 
     // ====== Map setup ======
     // hybrid = satellite (imagen aérea real) + labels. Más vibrante e
-    // inmersivo que outdoor-v2 (que es topo pálido).
-    const style = `https://api.maptiler.com/maps/hybrid/style.json?key=${maptilerKey}`
-    let map
-    try {
-      map = new maplibregl.Map({
-        container: 'map',
-        style,
-        center: [centerLon, centerLat],
-        zoom: 9,
-        pitch: 25,
-        bearing: -20,
-        maxPitch: 80,
-        interactive: false,
-        attributionControl: false,
-        renderWorldCopies: false,
-        fadeDuration: 0,
-      })
-    } catch (e) {
-      console.error(`[anim] map ctor failed: ${e.message}`); window.__flyoverError='map ctor'; window.__flyoverReady=true; return
-    }
-    map.on('error', e => console.error(`[anim] map err: ${e?.error?.message || JSON.stringify(e)}`))
+    // inmersivo que outdoor-v2 (que es topo pálido). Si el style falla
+    // en cargar (algún recurso 404ea en ciertas zonas), caemos a
+    // outdoor-v2 que es más liviano, antes de rendir el job.
+    const baseStyle = `https://api.maptiler.com/maps`
+    const styles = [
+      { name: 'hybrid', url: `${baseStyle}/hybrid/style.json?key=${maptilerKey}` },
+      { name: 'outdoor-v2', url: `${baseStyle}/outdoor-v2/style.json?key=${maptilerKey}` },
+    ]
+    const STYLE_LOAD_TIMEOUT_MS = 25000
 
-    await new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error('map load timeout')), 30000)
-      map.once('load', () => { clearTimeout(t); resolve() })
-    })
+    let map = null
+    let activeStyle = null
+    for (const s of styles) {
+      console.log(`[anim] loading style ${s.name}…`)
+      let attempt
+      try {
+        attempt = new maplibregl.Map({
+          container: 'map',
+          style: s.url,
+          center: [centerLon, centerLat],
+          zoom: 9,
+          pitch: 25,
+          bearing: -20,
+          maxPitch: 80,
+          interactive: false,
+          attributionControl: false,
+          renderWorldCopies: false,
+          fadeDuration: 0,
+        })
+      } catch (e) {
+        console.error(`[anim] map ctor failed (${s.name}): ${e.message}`)
+        continue
+      }
+      attempt.on('error', e => console.error(`[anim] map err (${s.name}): ${e?.error?.message || JSON.stringify(e)}`))
+
+      let ok = false
+      try {
+        await new Promise((resolve, reject) => {
+          const t = setTimeout(() => reject(new Error(`${s.name} map load timeout`)), STYLE_LOAD_TIMEOUT_MS)
+          attempt.once('load', () => { clearTimeout(t); resolve() })
+        })
+        ok = true
+      } catch {
+        ok = false
+      }
+
+      if (ok) {
+        map = attempt
+        activeStyle = s.name
+        console.log(`[anim] style ${s.name} loaded`)
+        break
+      }
+      attempt.remove()
+    }
+
+    if (!map) {
+      console.error('[anim] all styles failed to load')
+      window.__flyoverError = 'map load timeout'
+      window.__flyoverReady = true
+      return
+    }
+    void activeStyle
+
+    // ====== Apagar labels del mapa ======
+    // El spec pide que el terreno se vea pero los nombres no. Ocultamos
+    // toda capa `symbol` (texto + íconos de POI/places) del style base.
+    // Nuestras capas (polylines + cursor) se agregan después, no se tocan.
+    let hiddenLabels = 0
+    for (const layer of map.getStyle().layers) {
+      if (layer.type === 'symbol') {
+        try {
+          map.setLayoutProperty(layer.id, 'visibility', 'none')
+          hiddenLabels++
+        } catch (e) {
+          console.error(`[anim] hide label ${layer.id} failed: ${e.message}`)
+        }
+      }
+    }
+    console.log(`[anim] hidden ${hiddenLabels} label layers`)
 
     // ====== Terrain DEM 3D ======
     map.addSource('flyover-terrain-rgb', {
@@ -236,17 +317,17 @@
     map.addLayer({
       id:'route-full-line', type:'line', source:'route-full',
       layout:{ 'line-cap':'round', 'line-join':'round' },
-      paint:{ 'line-color':'#fff', 'line-opacity':0.22, 'line-width':4 },
+      paint:{ 'line-color':ROUTE_FULL_COLOR, 'line-opacity':ROUTE_FULL_OPACITY, 'line-width':ROUTE_FULL_WIDTH },
     })
     map.addLayer({
       id:'route-progress-glow', type:'line', source:'route-progress',
       layout:{ 'line-cap':'round', 'line-join':'round' },
-      paint:{ 'line-color':'#fbbf24', 'line-opacity':0.5, 'line-width':18, 'line-blur':10 },
+      paint:{ 'line-color':PROGRESS_GLOW_COLOR, 'line-opacity':0.5, 'line-width':18, 'line-blur':10 },
     })
     map.addLayer({
       id:'route-progress-line', type:'line', source:'route-progress',
       layout:{ 'line-cap':'round', 'line-join':'round' },
-      paint:{ 'line-color':'#fbbf24', 'line-width':7 },
+      paint:{ 'line-color':PROGRESS_COLOR, 'line-width':7 },
     })
     map.addLayer({
       id:'wp-marker-glow', type:'circle', source:'wp-marker',
@@ -270,38 +351,39 @@
     })
 
     // ====== Overlays static content ======
-    const introEyebrow = document.getElementById('introEyebrow')
-    introEyebrow.textContent = (route.location || 'Patagonia').toUpperCase()
+    const locationLabel = (route.location || 'Patagonia').toUpperCase()
+    document.getElementById('introEyebrow').textContent = locationLabel
     document.getElementById('introTitle').textContent = route.title
     document.getElementById('introDate').textContent = fmtDate(route.date)
-    document.getElementById('outroLocation').textContent = (route.location || 'Patagonia').toUpperCase()
+    document.getElementById('outroEyebrow').textContent = locationLabel
     document.getElementById('outroTitle').textContent = route.title
     document.getElementById('outroDate').textContent = fmtDate(route.date)
-    // Outro stats con auto-fit per columna (column width = ~360px)
+
+    // Outro stats con auto-fit por celda. Números siempre en blanco.
     function setOutroStat(id, text) {
       const el = document.getElementById(id)
       el.textContent = text
-      const col = 340 // ancho útil por columna
-      const ideal = col / (text.length * 0.6)
-      el.style.fontSize = `${Math.min(86, ideal).toFixed(0)}px`
+      const col = 800 // ancho útil por celda
+      const ideal = col / (text.length * 0.58)
+      el.style.fontSize = `${Math.min(96, ideal).toFixed(0)}px`
     }
     setOutroStat('outroKm', totalKm.toFixed(1))
-    setOutroStat('outroDPlus', String(Math.round(route.elevation_gain_m || 0)))
+    setOutroStat('outroDPlus', '+' + Math.round(route.elevation_gain_m || 0))
     setOutroStat('outroTime', fmtDuration(route.duration_seconds))
-    setOutroStat('outroWps', String(route.waypoints.length))
 
-    // Auto-fit title basado en char-width real para italic Helvetica Black.
-    // Para "Trilogía Punta Vera" (19 chars) en 132px italic bold el ancho
-    // real es ~132 × 19 × 0.6 = 1505 px. Más ancho que el padding (900 px).
-    function fitTitleSize(text, maxWidth, maxSize) {
-      const charRatio = 0.6
-      const ideal = maxWidth / (text.length * charRatio)
-      return Math.min(maxSize, ideal)
+    // Cuarto valor: hitos; si 0 → altitud máxima; si tampoco hay, ocultar.
+    const wpCount = route.waypoints.length
+    const maxAlt = route.max_altitude_m
+    const wpsCell = document.getElementById('outroWpsCell')
+    if (wpCount > 0) {
+      setOutroStat('outroWps', String(wpCount))
+      document.getElementById('outroWpsLabel').textContent = 'hitos'
+    } else if (maxAlt != null) {
+      setOutroStat('outroWps', String(Math.round(maxAlt)))
+      document.getElementById('outroWpsLabel').textContent = 'm máx'
+    } else {
+      wpsCell.style.display = 'none'
     }
-    const titleEl = document.getElementById('introTitle')
-    titleEl.style.fontSize = `${fitTitleSize(route.title, 900, 132).toFixed(0)}px`
-    const outroTitleEl = document.getElementById('outroTitle')
-    outroTitleEl.style.fontSize = `${fitTitleSize(route.title, 900, 110).toFixed(0)}px`
 
     // Esperar tiles y terrain
     console.log('[anim] waiting for terrain + tiles…')
@@ -332,36 +414,6 @@
       else el.classList.remove('visible')
     }
 
-    function showWaypoint(s, idx, total) {
-      const wp = s.wp
-      const el = document.getElementById('waypoint')
-      el.style.display = 'flex'
-      document.getElementById('wpEyebrow').textContent = (wp.title ? kindLabel(wp.kind) : '').toUpperCase()
-      const headline = wp.title || kindLabel(wp.kind)
-      const titleEl = document.getElementById('wpTitle')
-      titleEl.textContent = headline
-      // Card body width = 1080 - 80*2 - 18 - 144 - 22 - 18 = 720
-      // body padding right = 80 (para badge), texto util = 640
-      const targetW = 640
-      const ideal = targetW / (headline.length * 0.6)
-      titleEl.style.fontSize = `${Math.min(40, ideal).toFixed(0)}px`
-      document.getElementById('wpMeta').textContent = wp.altitude_m != null ? `${Math.round(wp.altitude_m)} m` : ''
-      document.getElementById('wpBadge').textContent = `${String(idx).padStart(2,'0')} / ${String(total).padStart(2,'0')}`
-      const photoEl = document.getElementById('wpPhoto')
-      if (wp.photo_url) {
-        photoEl.src = wp.photo_url
-        photoEl.style.display = 'block'
-      } else {
-        photoEl.style.display = 'none'
-      }
-      el.classList.add('visible')
-    }
-    function hideWaypoint() {
-      const el = document.getElementById('waypoint')
-      el.classList.remove('visible')
-      el.style.display = 'none'
-    }
-
     // Bearing inicial del recorrido (donde apunta al km 0).
     // Pre-cálculo para sincronizar intro→route sin salto de cámara.
     const initialRouteBearing = (function() {
@@ -373,26 +425,34 @@
     })()
 
     function renderFrame(f) {
-      let waypointMarkerCoord = null
-
       if (f < INTRO_END) {
-        const t = easeInOutCubic(f / INTRO_END)
-        // Intro: arranca con overview del bbox y termina EXACTAMENTE en
-        // los mismos valores con los que arranca el route phase (mismo
-        // center, zoom 13.5, pitch 50, bearing initial). Sin salto.
+        const t = easeOutQuart(f / INTRO_END)
+        // Intro estilo Google Earth: arranca desde órbita (zoom 3.5,
+        // pitch 0, vista cenital de toda la región) y "vuela" hasta el
+        // inicio de la ruta inclinando la cámara. Termina EXACTAMENTE en
+        // los valores del route phase para no saltar.
         const startLon = coords[0][0], startLat = coords[0][1]
         map.jumpTo({
           center: [
             centerLon + (startLon - centerLon) * t,
             centerLat + (startLat - centerLat) * t,
           ],
-          zoom: 9 + (13.5 - 9) * t,
-          pitch: 25 + (50 - 25) * t,
+          zoom: 3.5 + (ROUTE_PHASE_ZOOM - 3.5) * t,
+          pitch: 0 + (ROUTE_PHASE_PITCH - 0) * t,
           bearing: -30 + (initialRouteBearing - (-30)) * t,
         })
+        // Círculo de inicio de ruta: aparece cuando la cámara se asienta.
+        const dot = document.getElementById('startDot')
+        if (f >= INTRO_END - 40) {
+          const p = map.project([startLon, startLat])
+          dot.style.left = `${p.x}px`
+          dot.style.top = `${p.y}px`
+          dot.classList.add('visible')
+        } else {
+          dot.classList.remove('visible')
+        }
         setOverlayVisible('intro', f < INTRO_END - 8 ? true : false)
         setOverlayVisible('stats', false)
-        hideWaypoint()
         setOverlayVisible('outro', false)
       } else if (f < ROUTE_END) {
         const routeT = (f - INTRO_END) / (ROUTE_END - INTRO_END)
@@ -409,9 +469,9 @@
           smoothedBearing = (smoothedBearing + cap + 360) % 360
         }
 
-        // Zoom 13.5 + pitch 50: cámara más alta, menos oclusión cuando
-        // la ruta pasa detrás de un cerro. Ve más adelante el terreno.
-        map.jumpTo({ center: here, zoom: 13.5, pitch: 50, bearing: smoothedBearing })
+        // Zoom/pitch según familia de actividad. Cámara más alta para
+        // tierra (menos oclusión detrás de cerros), más cerca para agua.
+        map.jumpTo({ center: here, zoom: ROUTE_PHASE_ZOOM, pitch: ROUTE_PHASE_PITCH, bearing: smoothedBearing })
 
         // Update polyline progresiva
         const seg = coords.slice(0, idx+1).map(c => [c[0], c[1]])
@@ -419,51 +479,32 @@
         map.getSource('route-progress').setData({ type:'Feature', geometry:{ type:'LineString', coordinates: seg }, properties:{} })
         map.getSource('cursor').setData({ type:'Feature', geometry:{ type:'Point', coordinates: here }, properties:{} })
 
-        // Stats
+        // Stats (barra inferior) + regla de progreso
         document.getElementById('statKm').textContent = km.toFixed(1)
         document.getElementById('statAlt').textContent = String(Math.round(coords[idx][2] || 0))
-        document.getElementById('statDPlus').textContent = String(Math.round((route.elevation_gain_m || 0) * routeT))
+        document.getElementById('statDPlus').textContent = '+' + Math.round((route.elevation_gain_m || 0) * routeT)
+        document.getElementById('statsProgress').style.width = `${(routeT * 100).toFixed(1)}%`
 
+        document.getElementById('startDot').classList.remove('visible')
         setOverlayVisible('intro', false)
         setOverlayVisible('stats', true)
         setOverlayVisible('outro', false)
-
-        // Waypoint card schedule
-        const active = schedule.find(s => f >= s.startFrame && f < s.endFrame)
-        if (active) {
-          waypointMarkerCoord = [active.wp.lon, active.wp.lat]
-          const idxInSel = selected.findIndex(w => w.id === active.wp.id) + 1
-          showWaypoint(active, idxInSel, selected.length)
-        } else {
-          hideWaypoint()
-        }
       } else {
-        const t = easeInOutCubic((f - ROUTE_END) / (OUTRO_END - ROUTE_END))
+        const t = easeInCubic((f - ROUTE_END) / (OUTRO_END - ROUTE_END))
+        // Outro estilo Google Earth: lingera un instante y sale de vuelta
+        // a órbita (zoom 3.5, pitch 0) como bookend del intro.
         map.jumpTo({
           center: [centerLon, centerLat],
-          zoom: 12 - 2*t,
-          pitch: 55 - 30*t,
+          zoom: ROUTE_PHASE_ZOOM - (ROUTE_PHASE_ZOOM - 3.5) * t,
+          pitch: ROUTE_PHASE_PITCH - (ROUTE_PHASE_PITCH - 0) * t,
           bearing: 0,
         })
         map.getSource('route-progress').setData({ type:'Feature', geometry:{ type:'LineString', coordinates: flatCoords }, properties:{} })
 
+        document.getElementById('startDot').classList.remove('visible')
         setOverlayVisible('intro', false)
         setOverlayVisible('stats', false)
-        hideWaypoint()
         setOverlayVisible('outro', f >= ROUTE_END + 4)
-        // Ocultar watermark en outro — el outro ya tiene Rawko grande
-        const wm = document.querySelector('.watermark')
-        if (wm) wm.style.display = 'none'
-      }
-
-      // Marker del waypoint activo
-      if (waypointMarkerCoord) {
-        map.getSource('wp-marker').setData({
-          type:'FeatureCollection',
-          features:[{ type:'Feature', geometry:{ type:'Point', coordinates: waypointMarkerCoord }, properties:{} }],
-        })
-      } else {
-        map.getSource('wp-marker').setData({ type:'FeatureCollection', features:[] })
       }
     }
 

@@ -2,21 +2,41 @@ import { supabase } from './supabase.js'
 import type { FlyoverJob, RouteData } from './types.js'
 
 /**
+ * True si el error es de red/transporte a Supabase (no un error lógico
+ * de la RPC). Estos hay que propagarlos para que main() haga backoff,
+ * no tratarlos como "no hay jobs" (que es un estado normal e idle).
+ */
+function isNetworkError(e: unknown): boolean {
+  const s = `${(e as any)?.message ?? ''} ${(e as any)?.details ?? ''} ${(e as any)?.code ?? ''}`.toLowerCase()
+  return /econnreset|connect timeout|fetch failed|und_err|headers timeout|enotfound|econnrefused|network error|socket hang up/.test(s)
+}
+
+/**
  * Reclama un job pending con SKIP LOCKED. Devuelve null si no hay
  * trabajo. El job queda marcado como processing hasta que llamemos
  * a markDone() o markFailed().
+ *
+ * Si falla la red a Supabase, re-throw para que main() haga backoff en
+ * lugar de loopear a 30s tratándolo como idle.
  */
 export async function claimJob(): Promise<FlyoverJob | null> {
-  const { data, error } = await supabase.rpc('claim_flyover_jobs', {
-    batch_size: 1,
-  })
-  if (error) {
-    console.error('[queue] claim_flyover_jobs error', error)
+  try {
+    const { data, error } = await supabase.rpc('claim_flyover_jobs', {
+      batch_size: 1,
+    })
+    if (error) {
+      if (isNetworkError(error)) throw error
+      console.error('[queue] claim_flyover_jobs error', error)
+      return null
+    }
+    const rows = data as FlyoverJob[] | null
+    if (!rows || rows.length === 0) return null
+    return rows[0]
+  } catch (e) {
+    if (isNetworkError(e)) throw e
+    console.error('[queue] claim_flyover_jobs unexpected error', e)
     return null
   }
-  const rows = data as FlyoverJob[] | null
-  if (!rows || rows.length === 0) return null
-  return rows[0]
 }
 
 /**
@@ -31,6 +51,7 @@ export async function loadRouteData(job: FlyoverJob): Promise<RouteData | null> 
   let title: string | null = null
   let date: string | null = null
   let location: string | null = null
+  let activityFamily: string | null = null
 
   if (route_id) {
     // Ruta standalone (grabación directa, sin experience).
@@ -38,7 +59,7 @@ export async function loadRouteData(job: FlyoverJob): Promise<RouteData | null> 
       .from('routes')
       .select(
         'id, source, title, location, recorded_at, route_geojson, route_distance_km, ' +
-        'route_elevation_gain_m, duration_seconds, max_altitude_m',
+        'route_elevation_gain_m, duration_seconds, max_altitude_m, activity_family',
       )
       .eq('id', route_id)
       .maybeSingle()
@@ -54,11 +75,12 @@ export async function loadRouteData(job: FlyoverJob): Promise<RouteData | null> 
     title = (r as any).title
     location = (r as any).location
     date = (r as any).recorded_at
+    activityFamily = (r as any).activity_family ?? null
   } else if (experience_id) {
     // Ruta vinculada a una experience (flujo existente).
     const { data: exp, error: expErr } = await supabase
       .from('experiences')
-      .select('id, title, date, location')
+      .select('id, title, date, location, activity_family')
       .eq('id', experience_id)
       .maybeSingle()
     if (expErr) {
@@ -77,7 +99,7 @@ export async function loadRouteData(job: FlyoverJob): Promise<RouteData | null> 
       .from('routes')
       .select(
         'id, source, route_geojson, route_distance_km, route_elevation_gain_m, ' +
-        'duration_seconds, max_altitude_m',
+        'duration_seconds, max_altitude_m, activity_family',
       )
       .eq('experience_id', experience_id)
     if (routesErr) {
@@ -98,6 +120,8 @@ export async function loadRouteData(job: FlyoverJob): Promise<RouteData | null> 
       )
       return null
     }
+    activityFamily =
+      (route as any).activity_family ?? (exp as any).activity_family ?? null
   } else {
     console.error(`[queue] loadRouteData: job ${job.id} has neither experience_id nor route_id`)
     return null
@@ -120,6 +144,7 @@ export async function loadRouteData(job: FlyoverJob): Promise<RouteData | null> 
     elevation_gain_m: route.route_elevation_gain_m,
     duration_seconds: route.duration_seconds,
     max_altitude_m: route.max_altitude_m,
+    activity_family: activityFamily,
     waypoints: (waypointRows ?? []).map((w: any) => ({
       id: w.id,
       kind: w.kind,

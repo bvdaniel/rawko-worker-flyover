@@ -59,6 +59,7 @@ chown -R "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}"
 
 log "5/6 npm install + build"
 sudo -u "${SERVICE_USER}" -H bash -c "cd '${INSTALL_DIR}' && npm install --no-audit --no-fund"
+sudo -u "${SERVICE_USER}" -H bash -c "cd '${INSTALL_DIR}' && npx puppeteer browsers install chrome"
 sudo -u "${SERVICE_USER}" -H bash -c "cd '${INSTALL_DIR}' && npm run build"
 
 if [ ! -f "${INSTALL_DIR}/.env" ]; then

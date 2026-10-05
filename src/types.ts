@@ -31,6 +31,7 @@ export interface RouteData {
   elevation_gain_m: number | null
   duration_seconds: number | null
   max_altitude_m: number | null
+  activity_family: string | null
   waypoints: WaypointData[]
 }
 
