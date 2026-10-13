@@ -373,6 +373,58 @@
         color: var(--texto);
         line-height: 1;
       }
+
+      /* ===== 5. WAYPOINT CARD (route phase, debajo del pill de owner) ===== */
+      .waypoint {
+        top: 620px;
+        left: 50%;
+        width: 920px;
+        margin-left: -460px;
+        background: rgba(0,0,0,0.45);
+        border-radius: 28px;
+        padding: 18px;
+        height: 180px;
+        box-sizing: border-box;
+        display: flex;
+        gap: 22px;
+        position: absolute;
+      }
+      .waypoint-photo {
+        width: 144px; height: 144px;
+        border-radius: 18px;
+        object-fit: cover;
+        background: rgba(20,20,20,0.4);
+        flex-shrink: 0;
+      }
+      .waypoint-body { flex: 1; min-width: 0; position: relative; padding-right: 80px; }
+      .waypoint-eyebrow {
+        font-size: 19px; font-weight: 900; letter-spacing: 0.22em;
+        color: var(--acento);
+        text-transform: uppercase;
+        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
+        margin-top: 10px;
+      }
+      .waypoint-title {
+        margin-top: 8px;
+        font-size: 40px; font-weight: 900;
+        line-height: 1.05;
+        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
+        color: var(--texto);
+      }
+      .waypoint-meta {
+        margin-top: 10px;
+        font-size: 22px; font-weight: 500;
+        color: rgba(255,255,255,0.92);
+        letter-spacing: 0.06em;
+        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
+      }
+      .waypoint-badge {
+        position: absolute;
+        top: 6px; right: 0;
+        font-size: 16px; font-weight: 900; letter-spacing: 0.16em;
+        color: var(--acento);
+        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
+      }
     </style>
   </head>
   <body>
@@ -416,6 +468,17 @@
       <img id="statsOwnerAvatar" alt="" />
       <span class="name" id="statsOwnerName"></span>
       <span class="handle">· @rawko</span>
+    </div>
+
+    <!-- Waypoint card (route phase) -->
+    <div id="waypoint" class="overlay waypoint" style="display:none">
+      <img id="wpPhoto" class="waypoint-photo" alt="" />
+      <div class="waypoint-body">
+        <div class="waypoint-badge" id="wpBadge"></div>
+        <div class="waypoint-eyebrow" id="wpEyebrow"></div>
+        <div class="waypoint-title" id="wpTitle"></div>
+        <div class="waypoint-meta" id="wpMeta"></div>
+      </div>
     </div>
 
     <!-- ===== 3. Cierre ===== -->

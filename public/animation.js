@@ -470,6 +470,20 @@
       wpsCell.style.display = 'none'
     }
 
+    // ====== Selección + schedule de waypoints (hitos) ======
+    const selected = selectWaypoints(route.waypoints, coords)
+    const schedule = buildSchedule(selected, coords, cumulative, totalKm)
+    console.log(`[anim] schedule: ${schedule.map(s => `${s.wp.kind}@${s.startFrame}-${s.endFrame}`).join(', ')}`)
+
+    // Pre-cargar fotos de los waypoints seleccionados. Al crear un
+    // `new Image()` con el mismo src que después usa el <img> del card,
+    // el browser cachea el bitmap y la foto aparece al instante cuando
+    // showWaypoint() la asigna. Sin esto, hay 1-3 frames de delay
+    // mientras el fetch compite con el render del frame.
+    for (const s of schedule) {
+      if (s.wp.photo_url) new Image().src = s.wp.photo_url
+    }
+
     // Esperar tiles y terrain
     console.log('[anim] waiting for terrain + tiles…')
     await new Promise(resolve => setTimeout(resolve, 1500))
@@ -501,6 +515,36 @@
       else el.classList.remove('visible')
     }
 
+    function showWaypoint(s, idx, total) {
+      const wp = s.wp
+      const el = document.getElementById('waypoint')
+      if (!el) return
+      el.style.display = 'flex'
+      document.getElementById('wpEyebrow').textContent = (wp.title ? kindLabel(wp.kind) : '').toUpperCase()
+      const headline = wp.title || kindLabel(wp.kind)
+      const titleEl = document.getElementById('wpTitle')
+      titleEl.textContent = headline
+      const targetW = 640
+      const ideal = targetW / (headline.length * 0.6)
+      titleEl.style.fontSize = `${Math.min(40, ideal).toFixed(0)}px`
+      document.getElementById('wpMeta').textContent = wp.altitude_m != null ? `${Math.round(wp.altitude_m)} m` : ''
+      document.getElementById('wpBadge').textContent = `${String(idx).padStart(2,'0')} / ${String(total).padStart(2,'0')}`
+      const photoEl = document.getElementById('wpPhoto')
+      if (wp.photo_url) {
+        photoEl.src = wp.photo_url
+        photoEl.style.display = 'block'
+      } else {
+        photoEl.style.display = 'none'
+      }
+      el.classList.add('visible')
+    }
+    function hideWaypoint() {
+      const el = document.getElementById('waypoint')
+      if (!el) return
+      el.classList.remove('visible')
+      el.style.display = 'none'
+    }
+
     // Bearing inicial del recorrido (donde apunta al km 0).
     // Pre-cálculo para sincronizar intro→route sin salto de cámara.
     const initialRouteBearing = (function() {
@@ -512,6 +556,7 @@
     })()
 
     function renderFrame(f) {
+      let waypointMarkerCoord = null
       if (f < INTRO_END) {
         const t = easeOutQuart(f / INTRO_END)
         // Intro estilo Google Earth: arranca desde órbita (zoom 3.5,
@@ -598,6 +643,17 @@
         setOverlayVisible('stats', true)
         setOverlayVisible('statsOwner', true)
         setOverlayVisible('outro', false)
+
+        // Waypoint card schedule: mostrar la card + pin cuando la cámara
+        // pasa por un hito seleccionado.
+        const active = schedule.find(s => f >= s.startFrame && f < s.endFrame)
+        if (active) {
+          waypointMarkerCoord = [active.wp.lon, active.wp.lat]
+          const idxInSel = selected.findIndex(w => w.id === active.wp.id) + 1
+          showWaypoint(active, idxInSel, selected.length)
+        } else {
+          hideWaypoint()
+        }
       } else {
         const t = easeInCubic((f - ROUTE_END) / (OUTRO_END - ROUTE_END))
         // Outro estilo Google Earth: lingera un instante y sale de vuelta
@@ -616,6 +672,17 @@
         setOverlayVisible('statsOwner', false)
         setOverlayVisible('outro', f >= ROUTE_END + 4)
         if (cursorEl) cursorEl.classList.remove('visible')
+        hideWaypoint()
+      }
+
+      // Marker del waypoint activo (pin pulsante en el mapa).
+      if (waypointMarkerCoord) {
+        map.getSource('wp-marker').setData({
+          type:'FeatureCollection',
+          features:[{ type:'Feature', geometry:{ type:'Point', coordinates: waypointMarkerCoord }, properties:{} }],
+        })
+      } else {
+        map.getSource('wp-marker').setData({ type:'FeatureCollection', features:[] })
       }
     }
 
