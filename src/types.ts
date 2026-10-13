@@ -16,6 +16,12 @@ export interface FlyoverJob {
   updated_at: string
 }
 
+export interface OwnerData {
+  id: string
+  full_name: string | null
+  avatar_url: string | null
+}
+
 export interface RouteData {
   route_id: string
   experience_id: string | null
@@ -33,6 +39,9 @@ export interface RouteData {
   max_altitude_m: number | null
   activity_family: string | null
   waypoints: WaypointData[]
+  // Dueño de la ruta (para watermark de atribución en redes sociales).
+  // Si no hay avatar_url, el render skip-ea el watermark completamente.
+  owner: OwnerData | null
 }
 
 export interface WaypointData {

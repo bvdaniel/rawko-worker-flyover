@@ -411,6 +411,39 @@
     document.getElementById('outroTitle').textContent = route.title
     document.getElementById('outroDate').textContent = fmtDate(route.date)
 
+    // ====== Atribución (dueño de la ruta) ======
+    // Pill flotante debajo del bloque de stats (top-left) durante el
+    // recorrido + card centrada en el outro. Si el dueño no tiene
+    // avatar, solo omitimos la foto pero mantenemos nombre + @rawko.
+    const statsOwnerEl = document.getElementById('statsOwner')
+    const outroOwnerEl = document.getElementById('outroOwnerCard')
+    const ownerName = route.owner?.full_name ?? 'Aventurero Rawko'
+
+    if (route.owner) {
+      const statsAvatar = document.getElementById('statsOwnerAvatar')
+      if (route.owner.avatar_url) {
+        statsAvatar.src = route.owner.avatar_url
+        statsAvatar.style.display = ''
+      } else {
+        statsAvatar.style.display = 'none'
+      }
+      document.getElementById('statsOwnerName').textContent = ownerName
+
+      // Outro card: centrado, avatar solo si existe.
+      const outroAvatar = document.getElementById('outroOwnerAvatar')
+      if (route.owner.avatar_url) {
+        outroAvatar.src = route.owner.avatar_url
+        outroAvatar.style.display = ''
+      } else {
+        outroAvatar.style.display = 'none'
+      }
+      document.getElementById('outroOwnerName').textContent = ownerName
+    } else {
+      // Sin dueño (ruta huérfana): sin pill ni card outro.
+      if (statsOwnerEl) statsOwnerEl.remove()
+      if (outroOwnerEl) outroOwnerEl.remove()
+    }
+
     // Outro stats con auto-fit por celda. Números siempre en blanco.
     function setOutroStat(id, text) {
       const el = document.getElementById(id)
@@ -463,6 +496,7 @@
 
     function setOverlayVisible(id, visible) {
       const el = document.getElementById(id)
+      if (!el) return
       if (visible) el.classList.add('visible')
       else el.classList.remove('visible')
     }
@@ -506,6 +540,7 @@
         }
         setOverlayVisible('intro', f < INTRO_END - 8 ? true : false)
         setOverlayVisible('stats', false)
+        setOverlayVisible('statsOwner', false)
         setOverlayVisible('outro', false)
         if (cursorEl) cursorEl.classList.remove('visible')
       } else if (f < ROUTE_END) {
@@ -561,6 +596,7 @@
         document.getElementById('startDot').classList.remove('visible')
         setOverlayVisible('intro', false)
         setOverlayVisible('stats', true)
+        setOverlayVisible('statsOwner', true)
         setOverlayVisible('outro', false)
       } else {
         const t = easeInCubic((f - ROUTE_END) / (OUTRO_END - ROUTE_END))
@@ -577,6 +613,7 @@
         document.getElementById('startDot').classList.remove('visible')
         setOverlayVisible('intro', false)
         setOverlayVisible('stats', false)
+        setOverlayVisible('statsOwner', false)
         setOverlayVisible('outro', f >= ROUTE_END + 4)
         if (cursorEl) cursorEl.classList.remove('visible')
       }

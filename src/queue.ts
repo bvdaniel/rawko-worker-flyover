@@ -1,5 +1,27 @@
 import { supabase } from './supabase.js'
-import type { FlyoverJob, RouteData } from './types.js'
+import type { FlyoverJob, OwnerData, RouteData } from './types.js'
+
+/**
+ * Trae los datos públicos del dueño de la ruta para el watermark
+ * de atribución del video. Solo lo que se renderiza en pantalla —
+ * no exponemos email/phone/etc.
+ *
+ * Devuelve null si no hay owner (caso borde: ruta huérfana, owner
+ * borrado). El render skip-ea el watermark si owner es null.
+ */
+async function fetchOwner(userId: string | null): Promise<OwnerData | null> {
+  if (!userId) return null
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, full_name, avatar_url')
+    .eq('id', userId)
+    .maybeSingle()
+  if (error) {
+    console.error(`[queue] fetchOwner error for ${userId}`, error)
+    return null
+  }
+  return (data as OwnerData | null) ?? null
+}
 
 /**
  * True si el error es de red/transporte a Supabase (no un error lógico
@@ -52,6 +74,7 @@ export async function loadRouteData(job: FlyoverJob): Promise<RouteData | null> 
   let date: string | null = null
   let location: string | null = null
   let activityFamily: string | null = null
+  let ownerId: string | null = null
 
   if (route_id) {
     // Ruta standalone (grabación directa, sin experience).
@@ -76,6 +99,7 @@ export async function loadRouteData(job: FlyoverJob): Promise<RouteData | null> 
     location = (r as any).location
     date = (r as any).recorded_at
     activityFamily = (r as any).activity_family ?? null
+    ownerId = (r as any).owner_id ?? null
   } else if (experience_id) {
     // Ruta vinculada a una experience (flujo existente).
     const { data: exp, error: expErr } = await supabase
@@ -94,12 +118,13 @@ export async function loadRouteData(job: FlyoverJob): Promise<RouteData | null> 
     title = (exp as any).title
     date = (exp as any).date
     location = (exp as any).location
+    ownerId = (exp as any).organizer_id ?? null
 
     const { data: routes, error: routesErr } = await supabase
       .from('routes')
       .select(
         'id, source, route_geojson, route_distance_km, route_elevation_gain_m, ' +
-        'duration_seconds, max_altitude_m, activity_family',
+        'duration_seconds, max_altitude_m, activity_family, owner_id',
       )
       .eq('experience_id', experience_id)
     if (routesErr) {
@@ -122,6 +147,9 @@ export async function loadRouteData(job: FlyoverJob): Promise<RouteData | null> 
     }
     activityFamily =
       (route as any).activity_family ?? (exp as any).activity_family ?? null
+    // Preferir el owner_id de la ruta grabada (es el autor real del recorrido)
+    // sobre el organizer_id de la experience (puede ser un guía distinto).
+    if ((route as any).owner_id) ownerId = (route as any).owner_id
   } else {
     console.error(`[queue] loadRouteData: job ${job.id} has neither experience_id nor route_id`)
     return null
@@ -132,6 +160,8 @@ export async function loadRouteData(job: FlyoverJob): Promise<RouteData | null> 
     .select('id, kind, lat, lon, altitude_m, title, photo_url, taken_at')
     .eq('route_id', route.id)
     .order('taken_at', { ascending: true })
+
+  const owner = await fetchOwner(ownerId)
 
   return {
     route_id: route.id,
@@ -145,6 +175,7 @@ export async function loadRouteData(job: FlyoverJob): Promise<RouteData | null> 
     duration_seconds: route.duration_seconds,
     max_altitude_m: route.max_altitude_m,
     activity_family: activityFamily,
+    owner,
     waypoints: (waypointRows ?? []).map((w: any) => ({
       id: w.id,
       kind: w.kind,

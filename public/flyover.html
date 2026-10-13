@@ -285,6 +285,94 @@
         color: var(--muted);
         white-space: nowrap;
       }
+
+      /* ===== 4. ATRIBUCIÓN — dueño de la ruta =====
+         Pill flotante debajo del bloque de stats (top-left). El
+         stats bar sigue mostrando km/alt/d+; este pill agrega la
+         atribución del dueño. Card grande centrada al final. */
+      .stats-owner {
+        position: absolute;
+        top: 500px;
+        left: 60px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        height: 72px;
+        padding: 0 28px 0 10px;
+        background: rgba(12,14,18,0.72);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        border-radius: 999px;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+      }
+      .stats-owner img {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 2.5px solid rgba(224,160,26,0.7);
+        flex-shrink: 0;
+      }
+      .stats-owner .name {
+        font-size: 30px;
+        font-weight: 500;
+        color: var(--texto);
+        line-height: 1;
+      }
+      .stats-owner .handle {
+        font-size: 30px;
+        font-weight: 500;
+        color: var(--acento);
+        line-height: 1;
+      }
+
+      .outro-owner-card {
+        position: absolute;
+        top: 1130px;
+        left: 60px;
+        right: 60px;
+        height: 200px;
+        padding: 24px 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 28px;
+        background: rgba(12,14,18,0.78);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+        border-radius: 28px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.55);
+        border: 1px solid rgba(224,160,26,0.25);
+      }
+      .outro-owner-card img {
+        width: 120px;
+        height: 120px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 3px solid rgba(224,160,26,0.8);
+        flex-shrink: 0;
+      }
+      .outro-owner-card .text {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 10px;
+        min-width: 0;
+      }
+      .outro-owner-card .label {
+        font-size: 22px;
+        font-weight: 500;
+        letter-spacing: 0.18em;
+        color: var(--muted);
+        text-transform: uppercase;
+      }
+      .outro-owner-card .name {
+        font-size: 44px;
+        font-weight: 600;
+        color: var(--texto);
+        line-height: 1;
+      }
     </style>
   </head>
   <body>
@@ -323,6 +411,13 @@
       </div>
     </div>
 
+    <!-- Pill de atribución (debajo del stats, top-left) -->
+    <div id="statsOwner" class="overlay stats-owner">
+      <img id="statsOwnerAvatar" alt="" />
+      <span class="name" id="statsOwnerName"></span>
+      <span class="handle">· @rawko</span>
+    </div>
+
     <!-- ===== 3. Cierre ===== -->
     <div id="outro" class="overlay outro">
       <div class="outro-eyebrow eyebrow" id="outroEyebrow"></div>
@@ -346,6 +441,15 @@
         <div class="outro-stat" id="outroWpsCell">
           <div class="outro-stat-value" id="outroWps">0</div>
           <div class="outro-stat-label" id="outroWpsLabel">hitos</div>
+        </div>
+      </div>
+
+      <!-- Card grande de atribución al dueño (outro) -->
+      <div id="outroOwnerCard" class="outro-owner-card">
+        <img id="outroOwnerAvatar" alt="" />
+        <div class="text">
+          <div class="label">Recorrido creado por</div>
+          <div class="name" id="outroOwnerName"></div>
         </div>
       </div>
     </div>
