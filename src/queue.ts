@@ -224,3 +224,26 @@ export async function markFailed(jobId: string, errorMessage: string): Promise<v
     console.error('[queue] complete (failed) error', error)
   }
 }
+
+/**
+ * Devuelve un job ya reclamado (status='processing') a la cola con un
+ * next_attempt_at futuro, SIN consumir reintentos. Para errores de
+ * infraestructura (Chrome faltante, red caída): el job quedó en
+ * processing al reclamarlo, pero nunca lo vamos a volver a reclamar
+ * porque claim_flyover_jobs solo toma jobs pending. Sin esto, el job
+ * quedaba colgado en processing para siempre.
+ */
+export async function rescheduleJob(jobId: string, delayMs: number): Promise<void> {
+  const { error } = await supabase
+    .from('flyover_jobs')
+    .update({
+      status: 'pending',
+      next_attempt_at: new Date(Date.now() + delayMs).toISOString(),
+      started_at: null,
+      error_message: null,
+    })
+    .eq('id', jobId)
+  if (error) {
+    console.error('[queue] reschedule error', error)
+  }
+}

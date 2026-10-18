@@ -1,5 +1,5 @@
 import 'dotenv/config'
-import { claimJob, loadRouteData, markDone, markFailed } from './queue.js'
+import { claimJob, loadRouteData, markDone, markFailed, rescheduleJob } from './queue.js'
 import { renderFlyover, cleanupTmp, InfraChromeMissingError } from './render.js'
 import { uploadFlyover } from './upload.js'
 
@@ -74,11 +74,14 @@ async function processOne(): Promise<boolean> {
   } catch (error: any) {
     if (error instanceof InfraChromeMissingError) {
       // Infra local rota, no culpa de la ruta. NO consumir reintentos:
-      // dejamos el job en 'processing', hacemos backoff progresivo y el
-      // próximo poll lo vuelve a intentar con Chrome ya arreglado.
+      // devolvemos el job a la cola (pending) con un next_attempt_at
+      // futuro y backoff progresivo. Si lo dejamos en 'processing',
+      // claim_flyover_jobs nunca lo vuelve a tomar (solo reclama
+      // pending) y quedaba colgado para siempre.
       const wait = INFRA_BACKOFF_MS[Math.min(infraBackoffIdx, INFRA_BACKOFF_MS.length - 1)]
+      await rescheduleJob(job.id, wait)
       console.error(
-        `[worker] chrome missing for job ${job.id} — backoff ${Math.round(wait / 60_000)}min (infra attempt ${infraBackoffIdx + 1}). Job queda en processing.`,
+        `[worker] chrome missing for job ${job.id} — reencolado +${Math.round(wait / 60_000)}min (infra attempt ${infraBackoffIdx + 1}).`,
       )
       infraBackoffIdx++
       await sleep(wait)
