@@ -43,6 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrender1 \
     libxss1 \
     libxtst6 \
+    unzip \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
@@ -50,7 +51,7 @@ WORKDIR /app
 
 # ── Dependencias Node (usa package-lock para builds reproducibles) ──
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN PUPPETEER_SKIP_DOWNLOAD=1 npm ci
 
 # ── Chrome para Puppeteer (~150 MB, cache de Puppeteer) ──
 # Se instala acá (y no en runtime) para que Railway cachee la capa y el
