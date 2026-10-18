@@ -82,7 +82,7 @@ export async function loadRouteData(job: FlyoverJob): Promise<RouteData | null> 
       .from('routes')
       .select(
         'id, source, title, location, recorded_at, route_geojson, route_distance_km, ' +
-        'route_elevation_gain_m, duration_seconds, max_altitude_m, activity_family',
+        'route_elevation_gain_m, duration_seconds, max_altitude_m, activity_family, owner_id',
       )
       .eq('id', route_id)
       .maybeSingle()
