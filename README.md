@@ -61,21 +61,51 @@ npm run test:single -- <experience_id>   # renderiza una sola sin tocar cola
 > (10min → 30min → 1h → 2h → 4h) y deja el job en `processing` sin quemar
 > reintentos hasta que el binario aparezca.
 
-## Deploy en Railway
+## Deploy en Railway (o cualquier VM Linux)
+
+El worker v0.3 usa Chrome headless + WebGL. En una VM Linux **sin GPU**, el
+WebGL cae a SwiftShader (software, por CPU) gracias al flag
+`--enable-unsafe-swiftshader` que ya está en `src/render.ts`. Eso hace los
+renders **~3-5x más lentos que en una Mac con Metal** (~5-10 min vs 2 min),
+pero no requiere GPU dedicada.
+
+### Railway
 
 1. Crear cuenta en railway.app y conectar el repo de GitHub.
 2. New Project → Deploy from GitHub repo → seleccionar `rawko-worker-flyover`.
-3. Railway detecta el `Dockerfile` automáticamente.
+3. Railway detecta el `Dockerfile` y lo buildea (Chrome se baja en el build,
+   cacheado entre deploys).
 4. Settings → Variables → agregar:
    - `SUPABASE_URL`
    - `SUPABASE_SERVICE_ROLE_KEY` (mismo valor que en `.env.local` de rawko web)
    - `MAPTILER_KEY`
    - `WEB_URL=https://rawko.io`
-5. Deploy. Railway hostea el worker como un proceso de larga duración (no
-   web server, no health checks HTTP — es un loop).
+5. Deploy. Railway lo hostea como proceso de larga duración (no web server,
+   no health checks HTTP — es un loop).
 
-Plan Hobby de Railway: USD 5/mes con 500h de cómputo. Cada render toma 30-90s,
-así que el worker está idle el 99% del tiempo y consume crédito mínimo.
+> Sin `Dockerfile`: el repo lo trae. Si el build falla por deps de Chrome,
+> revisá la lista de `apt-get install` en el Dockerfile contra la doc de
+> Puppeteer para la versión actual.
+
+### VM Linux genérica (DigitalOcean/Hetzner/etc.)
+
+1. VM Ubuntu 24.04 con ≥ 2 GB RAM (Chrome headless + SwiftShader piden
+   ~500 MB en render).
+2. Instalar deps: `ffmpeg`, `node` ≥ 22, y las libs de Chrome del Dockerfile.
+3. `git clone` + `npm ci` + `npx puppeteer browsers install chrome` +
+   `npm run build`.
+4. Correr `node dist/index.js` bajo systemd (ver `setup.sh` como referencia,
+   aunque es de v0.2 — adaptar deps a v0.3).
+
+### Dos workers a la vez
+
+`claim_flyover_jobs` usa `FOR UPDATE SKIP LOCKED`, así que podés correr el
+worker de tu Mac **y** el de Railway en paralelo: cada uno reclama jobs
+distintos. Útil para mantener la Mac como backup mientras Railway agarra
+confianza.
+
+Plan Hobby de Railway: USD 5/mes con 500h de cómputo. El worker está idle el
+99% del tiempo, así que consume crédito mínimo.
 
 ## Coreografía
 

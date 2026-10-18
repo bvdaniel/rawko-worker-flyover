@@ -157,6 +157,10 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
           `--window-size=${VIDEO_WIDTH},${VIDEO_HEIGHT}`,
           '--ignore-gpu-blocklist',
           '--enable-webgl',
+          // Sin esto, Chrome 119+ se niega a inicializar WebGL por
+          // software (SwiftShader) en VMs Linux sin GPU. Inocuo en Mac
+          // (ahí Chrome usa Metal y lo ignora).
+          '--enable-unsafe-swiftshader',
           '--font-render-hinting=none',
         ],
         protocolTimeout: 600_000,
