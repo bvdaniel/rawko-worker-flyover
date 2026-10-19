@@ -28,7 +28,7 @@
 
   const KIND_LABELS = {
     cumbre: 'Cumbre', camping: 'Camping', cruce_rio: 'Cruce de río',
-    agua_potable: 'Agua potable', mirador: 'Mirador', puente: 'Puente',
+    agua_potable: 'Agua', mirador: 'Mirador', puente: 'Puente',
     peligro: 'Peligro', descanso: 'Descanso', foto: 'Foto', tranquera: 'Tranquera',
   }
   const KIND_TIERS = {
