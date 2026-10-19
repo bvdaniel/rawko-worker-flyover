@@ -374,12 +374,19 @@
         line-height: 1;
       }
 
-      /* ===== 5. WAYPOINT CARD (route phase, debajo del pill de owner) ===== */
+      /* ===== 5. WAYPOINT CARD (route phase, bottom-left safe area) =====
+         Movido del centro superior a la zona segura inferior-izquierda
+         (estilo Reels: x<780, y>1100) para no tapar el cerro/paisaje
+         del 3D en el centro del frame. Ancho 720px para no cruzar la
+         columna de botones Reels del lado derecho. top = 1360 (card
+         height 180) para empujar al ras del borde inferior de Reels
+         safe area. */
       .waypoint {
-        top: 620px;
-        left: 50%;
-        width: 920px;
-        margin-left: -460px;
+        top: 1360px;
+        left: 60px;
+        right: auto;
+        margin-left: 0;
+        width: 720px;
         background: rgba(0,0,0,0.45);
         border-radius: 28px;
         padding: 18px;
