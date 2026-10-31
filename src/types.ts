@@ -20,6 +20,7 @@ export interface OwnerData {
   id: string
   full_name: string | null
   avatar_url: string | null
+  gender: string | null
 }
 
 export interface RouteData {
@@ -38,6 +39,9 @@ export interface RouteData {
   duration_seconds: number | null
   max_altitude_m: number | null
   activity_family: string | null
+  // Emoji del cursor guía en el flyover (override por género del dueño).
+  // Si null/undefined, el front usa el default por familia.
+  emoji_override?: string | null
   waypoints: WaypointData[]
   // Dueño de la ruta (para watermark de atribución en redes sociales).
   // Si no hay avatar_url, el render skip-ea el watermark completamente.

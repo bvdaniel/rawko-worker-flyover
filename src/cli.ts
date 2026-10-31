@@ -8,6 +8,7 @@
 
 import 'dotenv/config'
 import { supabase } from './supabase.js'
+import { flyoverCursorEmoji } from './queue.js'
 import { renderFlyover } from './render.js'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -72,6 +73,10 @@ async function loadByTitle(title: string): Promise<RouteData | null> {
     duration_seconds: route.duration_seconds,
     max_altitude_m: route.max_altitude_m,
     activity_family: (route as any).activity_family ?? (exp as any).activity_family ?? null,
+    emoji_override: flyoverCursorEmoji(
+      (route as any).activity_family ?? (exp as any).activity_family ?? null,
+      owner?.gender ?? null,
+    ),
     owner,
     waypoints: (waypointRows ?? []).map((w: any) => ({
       id: w.id,
@@ -118,6 +123,7 @@ async function loadByRouteId(routeId: string): Promise<RouteData | null> {
     duration_seconds: (r as any).duration_seconds,
     max_altitude_m: (r as any).max_altitude_m,
     activity_family: (r as any).activity_family ?? null,
+    emoji_override: flyoverCursorEmoji((r as any).activity_family ?? null, owner?.gender ?? null),
     owner,
     waypoints: (waypointRows ?? []).map((w: any) => ({
       id: w.id,

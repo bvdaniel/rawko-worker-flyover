@@ -13,7 +13,7 @@ async function fetchOwner(userId: string | null): Promise<OwnerData | null> {
   if (!userId) return null
   const { data, error } = await supabase
     .from('users')
-    .select('id, full_name, avatar_url')
+    .select('id, full_name, avatar_url, gender')
     .eq('id', userId)
     .maybeSingle()
   if (error) {
@@ -175,6 +175,7 @@ export async function loadRouteData(job: FlyoverJob): Promise<RouteData | null> 
     duration_seconds: route.duration_seconds,
     max_altitude_m: route.max_altitude_m,
     activity_family: activityFamily,
+    emoji_override: flyoverCursorEmoji(activityFamily, owner?.gender ?? null),
     owner,
     waypoints: (waypointRows ?? []).map((w: any) => ({
       id: w.id,
@@ -246,4 +247,14 @@ export async function rescheduleJob(jobId: string, delayMs: number): Promise<voi
   if (error) {
     console.error('[queue] reschedule error', error)
   }
+}
+
+/**
+ * Emoji del cursor guía del flyover. Sólo agua (kayak/remo) tiene variante
+ * femenina en Unicode (🚣‍♀️); parapente es 🪂 (sin variante de género).
+ * Para el resto, null → el front usa el default por familia (círculo ámbar).
+ */
+export function flyoverCursorEmoji(family: string | null, gender: string | null): string | null {
+  if (family === 'agua' && gender === 'female') return '🚣‍♀️'
+  return null
 }
