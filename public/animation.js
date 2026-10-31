@@ -261,7 +261,11 @@
     const USE_EMOJI = CURSOR_EMOJI.length > 0
     const BASE_FLIP = ACTIVITY_EMOJI_BASE_FLIP[ROUTE_FAMILY] ?? 1
     const cursorEl = document.getElementById('cursorEmoji')
-    if (cursorEl) cursorEl.textContent = CURSOR_EMOJI
+    if (cursorEl) {
+      cursorEl.textContent = CURSOR_EMOJI
+      if (IS_WATER) cursorEl.classList.add('water')
+      else cursorEl.classList.remove('water')
+    }
 
     console.log(`[anim] route ${route.title}: ${coords.length} coords, ${totalKm.toFixed(1)} km, family=${ROUTE_FAMILY || '(none)'}, zoom=${ROUTE_PHASE_ZOOM}, pitch=${ROUTE_PHASE_PITCH}`)
 
