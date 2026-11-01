@@ -98,6 +98,61 @@
     for (let i = 1; i < coords.length; i++) out[i] = out[i-1] + haversineKm(coords[i-1], coords[i])
     return out
   }
+
+  // ====== Desnivel canónico (espejo de lib/elevation-stats.ts, web) ======
+  // Mediana 5 + cap 100 m/paso + histéresis 3 m, D− simétrico al D+.
+  // Devuelve curvas ACUMULADAS: gainCum[i] = cuánto subiste hasta el punto i.
+  // (El video mostraba D+ = total × routeT, lineal → en la cumbre parecía
+  // que solo habías subido la mitad.)
+  function medianFilter(values, window) {
+    if (window <= 1 || values.length === 0) return values.slice()
+    const half = Math.floor(window / 2)
+    const out = []
+    for (let i = 0; i < values.length; i++) {
+      const lo = Math.max(0, i - half)
+      const hi = Math.min(values.length - 1, i + half)
+      const win = values.slice(lo, hi + 1).sort((a, b) => a - b)
+      out.push(win[Math.floor(win.length / 2)])
+    }
+    return out
+  }
+  function buildElevationCurves(coords) {
+    const n = coords.length
+    const gainCum = new Array(n).fill(0)
+    const lossCum = new Array(n).fill(0)
+    // Serie densa de elevaciones (los null se arrastran después).
+    const dense = []
+    const denseIdx = []
+    for (let i = 0; i < n; i++) {
+      const e = coords[i][2]
+      if (typeof e === 'number' && isFinite(e)) { dense.push(e); denseIdx.push(i) }
+    }
+    if (dense.length >= 2) {
+      const s = dense.length >= 5 ? medianFilter(dense, 5) : dense
+      let g = 0, l = 0, ref = s[0]
+      for (let j = 1; j < s.length; j++) {
+        const e = s[j]
+        if (Math.abs(e - s[j - 1]) > 100) { // salto imposible → glitch
+          gainCum[denseIdx[j]] = g
+          lossCum[denseIdx[j]] = l
+          continue
+        }
+        if (e > ref) { g += e - ref; ref = e }
+        else if (ref - e >= 3) { l += ref - e; ref = e }
+        gainCum[denseIdx[j]] = g
+        lossCum[denseIdx[j]] = l
+      }
+    }
+    // Arrastrar nulls con el valor anterior.
+    for (let i = 1; i < n; i++) {
+      const e = coords[i][2]
+      if (!(typeof e === 'number' && isFinite(e))) {
+        gainCum[i] = gainCum[i - 1]
+        lossCum[i] = lossCum[i - 1]
+      }
+    }
+    return { gainCum, lossCum }
+  }
   function bbox(coords) {
     let mnLon=Infinity, mnLat=Infinity, mxLon=-Infinity, mxLat=-Infinity
     for (const [lon,lat] of coords) {
@@ -233,6 +288,22 @@
     }
     const cumulative = buildCumulative(coords)
     const totalKm = cumulative[cumulative.length - 1]
+
+    // Desnivel acumulado (canónico) + regla 95% para ocultar la celda
+    // que no aporta (ruta casi todo descenso → sin D+; casi todo ascenso
+    // → sin D−; plana → sin ambas).
+    const elevCurves = buildElevationCurves(coords)
+    const totalGain = elevCurves.gainCum[elevCurves.gainCum.length - 1] || 0
+    const totalLoss = elevCurves.lossCum[elevCurves.lossCum.length - 1] || 0
+    const vertical = totalGain + totalLoss
+    const hasEle = vertical > 0 || coords.some(c => typeof c[2] === 'number' && isFinite(c[2]))
+    const showGain = hasEle && totalGain / vertical >= 0.05
+    const showLoss = hasEle && totalLoss / vertical >= 0.05
+    const dPlusCell = document.getElementById('dPlusCell')
+    const dMinusCell = document.getElementById('dMinusCell')
+    if (dPlusCell && !showGain) dPlusCell.style.display = 'none'
+    if (dMinusCell && !showLoss) dMinusCell.style.display = 'none'
+
     const [mnLon, mnLat, mxLon, mxLat] = bbox(coords)
     const centerLon = (mnLon+mxLon)/2
     const centerLat = (mnLat+mxLat)/2
@@ -457,7 +528,7 @@
       el.style.fontSize = `${Math.min(80, ideal).toFixed(0)}px`
     }
     setOutroStat('outroKm', totalKm.toFixed(1))
-    setOutroStat('outroDPlus', '+' + Math.round(route.elevation_gain_m || 0))
+    setOutroStat('outroDPlus', '+' + Math.round(totalGain))
     setOutroStat('outroTime', fmtDuration(route.duration_seconds))
 
     // Cuarto valor: hitos; si 0 → altitud máxima; si tampoco hay, ocultar.
@@ -636,10 +707,14 @@
           cursorEl.classList.remove('visible')
         }
 
-        // Stats (barra inferior) + regla de progreso
+        // Stats (barra inferior) + regla de progreso. D+/D− acumulados:
+        // suben mientras subís, se congelan mientras bajás (y viceversa).
+        const dPlus = showGain ? Math.round(elevCurves.gainCum[idx]) : 0
+        const dMinus = showLoss ? Math.round(elevCurves.lossCum[idx]) : 0
         document.getElementById('statKm').textContent = km.toFixed(1)
         document.getElementById('statAlt').textContent = String(Math.round(coords[idx][2] || 0))
-        document.getElementById('statDPlus').textContent = '+' + Math.round((route.elevation_gain_m || 0) * routeT)
+        document.getElementById('statDPlus').textContent = '+' + dPlus
+        document.getElementById('statDMinus').textContent = '-' + dMinus
         document.getElementById('statsProgress').style.width = `${(routeT * 100).toFixed(1)}%`
 
         document.getElementById('startDot').classList.remove('visible')
