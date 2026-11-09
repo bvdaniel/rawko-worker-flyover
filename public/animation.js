@@ -72,17 +72,36 @@
     parapente: 1,
     '4x4': 1,
   }
-  // Zoom de la fase route por familia (el río necesita acercarse, la
-  // cuerda/nieve son verticales y lentas, el vuelo y el camino más contexto).
-  const ZOOM_BY_FAMILY = {
-    agua: 14.5,
-    parapente: 14.5,
-    cuerda: 15,
-    nieve: 14,
-    bici: 13.5,
-    cabalgata: 13,
-    pie: 13,
-    '4x4': 13.5,
+  // Distancia de cámara por familia = ANCHO del frame en metros de terreno
+  // (a la altura del cursor). No es un nivel de zoom: el zoom necesario para
+  // cubrir una cierta distancia depende de la latitud (m/px =
+  // 78271.517·cos(lat)/2^zoom), así que fijar zoom daría 5,9 km a 55°S y
+  // 10,3 km a 3°S para el mismo ajuste. Con metros la cámara se siente igual
+  // en todo el país. El río y la cuerda necesitan acercarse (estrechos);
+  // el vuelo y los vehículos, más contexto.
+  const WIDTH_M_BY_FAMILY = {
+    agua: 2800,
+    parapente: 2800,
+    cuerda: 2000,
+    nieve: 3700,
+    bici: 5200,
+    cabalgata: 7400,
+    '4x4': 5200,
+    moto: 5200,
+    pesca: 5200,
+    observacion_fauna: 5200,
+    pie: 2600,
+  }
+  const DEFAULT_WIDTH_M = 5200
+  const FRAME_W_PX = 1080
+  const M_PER_PX_AT_Z0 = 78271.517   // tileSize 512 de MapLibre
+  const ZOOM_MIN = 13
+  const ZOOM_MAX = 14.6
+
+  // Con más zoom la traza se ve proporcionalmente más fina; para `pie`
+  // (que sube de 13 a ~14.5) engrosamos un poco la línea para que se lea.
+  const LINE_SCALE_BY_FAMILY = {
+    pie: 1.35,
   }
 
   function deg2rad(d) { return d * Math.PI / 180 }
@@ -308,12 +327,17 @@
     const centerLon = (mnLon+mxLon)/2
     const centerLat = (mnLat+mxLat)/2
 
-    // Preset de cámara por familia de actividad. El río necesita
-    // acercarse (estrecho); el vehículo y el vuelo, más contexto.
+    // Preset de cámara por familia de actividad. La distancia se expresa en
+    // metros de ancho de frame y se convierte a zoom con la latitud de la
+    // ruta (D3 del plan): así la cámara se siente igual en toda la cordillera.
     const ROUTE_FAMILY = route.activity_family || ''
     const IS_WATER = ROUTE_FAMILY === 'agua'
-    const ROUTE_PHASE_ZOOM = ZOOM_BY_FAMILY[ROUTE_FAMILY] ?? (IS_WATER ? 14.5 : 13.5)
+    const CAMERA_WIDTH_M = WIDTH_M_BY_FAMILY[ROUTE_FAMILY] ?? DEFAULT_WIDTH_M
+    const ROUTE_PHASE_ZOOM = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN,
+      Math.log2(M_PER_PX_AT_Z0 * Math.cos(centerLat * Math.PI / 180)
+                 * FRAME_W_PX / CAMERA_WIDTH_M)))
     const ROUTE_PHASE_PITCH = IS_WATER ? 55 : 50
+    const ROUTE_LINE_SCALE = LINE_SCALE_BY_FAMILY[ROUTE_FAMILY] ?? 1
 
     // Formato "cinta de agua": para rutas de agua dibujamos el trazo
     // completo como una banda azul (el río) en vez de una línea blanca
@@ -439,17 +463,17 @@
     map.addLayer({
       id:'route-full-line', type:'line', source:'route-full',
       layout:{ 'line-cap':'round', 'line-join':'round' },
-      paint:{ 'line-color':ROUTE_FULL_COLOR, 'line-opacity':ROUTE_FULL_OPACITY, 'line-width':ROUTE_FULL_WIDTH },
+      paint:{ 'line-color':ROUTE_FULL_COLOR, 'line-opacity':ROUTE_FULL_OPACITY, 'line-width':ROUTE_FULL_WIDTH * ROUTE_LINE_SCALE },
     })
     map.addLayer({
       id:'route-progress-glow', type:'line', source:'route-progress',
       layout:{ 'line-cap':'round', 'line-join':'round' },
-      paint:{ 'line-color':PROGRESS_GLOW_COLOR, 'line-opacity':0.5, 'line-width':18, 'line-blur':10 },
+      paint:{ 'line-color':PROGRESS_GLOW_COLOR, 'line-opacity':0.5, 'line-width':18 * ROUTE_LINE_SCALE, 'line-blur':10 },
     })
     map.addLayer({
       id:'route-progress-line', type:'line', source:'route-progress',
       layout:{ 'line-cap':'round', 'line-join':'round' },
-      paint:{ 'line-color':PROGRESS_COLOR, 'line-width':7 },
+      paint:{ 'line-color':PROGRESS_COLOR, 'line-width':7 * ROUTE_LINE_SCALE },
     })
     map.addLayer({
       id:'wp-marker-glow', type:'circle', source:'wp-marker',
