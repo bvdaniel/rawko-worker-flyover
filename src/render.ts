@@ -23,7 +23,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const VIDEO_WIDTH = 1080
 const VIDEO_HEIGHT = 1920
 const FPS = 30
-const TOTAL_FRAMES = 630
 const READY_TIMEOUT_MS = 60_000
 
 const MAPTILER_KEY = process.env.MAPTILER_KEY
@@ -82,7 +81,7 @@ function startStaticServer(): Promise<{ port: number; close: () => void }> {
   })
 }
 
-async function captureFrames(page: Page, framesDir: string): Promise<number> {
+async function captureFrames(page: Page, framesDir: string): Promise<{ total: number; captured: number }> {
   const totalFrames = await page.evaluate(
     () => (globalThis as unknown as { __totalFrames?: number }).__totalFrames,
   )
@@ -109,7 +108,7 @@ async function captureFrames(page: Page, framesDir: string): Promise<number> {
     }
   }
   console.log(`[render] all ${totalFrames} frames in ${((Date.now() - t0)/1000).toFixed(1)}s`)
-  return totalFrames
+  return { total: totalFrames, captured: totalFrames }
 }
 
 function encodeMp4(framesDir: string, outputPath: string): Promise<void> {
@@ -224,9 +223,9 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
     }
     console.log('[render] anim ready')
 
-    const framesCount = await captureFrames(page, framesDir)
-    if (framesCount < TOTAL_FRAMES * 0.85) {
-      throw new Error(`only ${framesCount}/${TOTAL_FRAMES} frames captured`)
+    const { total: framesTotal, captured: framesCount } = await captureFrames(page, framesDir)
+    if (framesCount < framesTotal * 0.85) {
+      throw new Error(`only ${framesCount}/${framesTotal} frames captured`)
     }
 
     console.log('[render] closing chrome…')

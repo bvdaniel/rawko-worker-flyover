@@ -6,16 +6,36 @@
 // determinísticamente.
 
 (function () {
-  const TOTAL_FRAMES = 630
   const FPS = 30
-  const INTRO_END = 90   // 3s intro (caída desde órbita más pausada)
-  const ROUTE_END = 540  // 15s recorrido
-  const OUTRO_END = TOTAL_FRAMES // 3s outro
 
-  // Cámara
-  const BEARING_LOOKAHEAD = 40
-  const BEARING_EMA_ALPHA = 0.04
+  // ── Duración dinámica ─────────────────────────────────────
+  // El video se alarga en función de la distancia de la ruta con un
+  // tope de velocidad de cámara (km/s). Rutas cortas se mantienen en
+  // 21 s exactos (630 frames) — cero regresión. Las largas se estiran
+  // para que la cámara no vuele a 7+ km/s (que era el caso: 450 frames
+  // fijos para 113 km).
+  const INTRO_FRAMES = 90        // 3 s intro (caída desde órbita)
+  const OUTRO_FRAMES = 90        // 3 s outro
+  const BASE_ROUTE_FRAMES = 450  // 15 s de recorrido (mínimo)
+  const MAX_SPEED_KM_S = 2.0     // tope de velocidad de cámara
+  const MAX_ROUTE_FRAMES = 2700  // 90 s de recorrido (tope duro ≈ 180 km)
+
+  let TOTAL_FRAMES = 630
+  let INTRO_END = 90
+  let ROUTE_END = 540
+  let OUTRO_END = 630
+
+  // Cámara (lookahead por distancia + EMA adaptativo a la velocidad)
+  const BEARING_LOOKAHEAD_TARGET_M = 800
+  const BEARING_LOOKAHEAD_MIN_PTS = 12
+  const BEARING_LOOKAHEAD_MAX_PTS = 40
+  const BEARING_EMA_ALPHA_PER_M = 0.0012
+  const BEARING_EMA_ALPHA_MIN = 0.02
+  const BEARING_EMA_ALPHA_MAX = 0.40
   const BEARING_MAX_DELTA = 1.5
+
+  // Polilínea de progreso decimada (hoy re-sube 4000 vértices por frame)
+  const MAX_PROGRESS_POINTS = 1000
 
   // Waypoints
   const MAX_WAYPOINTS = 6
@@ -116,6 +136,9 @@
     const out = new Array(coords.length).fill(0)
     for (let i = 1; i < coords.length; i++) out[i] = out[i-1] + haversineKm(coords[i-1], coords[i])
     return out
+  }
+  function clamp(v, lo, hi) {
+    return v < lo ? lo : (v > hi ? hi : v)
   }
 
   // ====== Desnivel canónico (espejo de lib/elevation-stats.ts, web) ======
@@ -307,6 +330,37 @@
     }
     const cumulative = buildCumulative(coords)
     const totalKm = cumulative[cumulative.length - 1]
+
+    // Duración proporcional a la distancia (tope de velocidad de cámara).
+    const routeFrames = Math.min(
+      MAX_ROUTE_FRAMES,
+      Math.max(BASE_ROUTE_FRAMES, Math.ceil((totalKm / MAX_SPEED_KM_S) * FPS)),
+    )
+    TOTAL_FRAMES = INTRO_FRAMES + routeFrames + OUTRO_FRAMES
+    INTRO_END = INTRO_FRAMES
+    ROUTE_END = INTRO_END + routeFrames
+    OUTRO_END = TOTAL_FRAMES
+
+    // Cámara: lookahead y EMA del bearing dependientes de la velocidad real
+    // (m por frame). Así la cámara atrasa una distancia constante, no un nº
+    // de frames fijo — clave para que rutas largas no "arrastren".
+    const stepM = routeFrames > 0 ? (totalKm * 1000) / routeFrames : 0
+    const lookaheadPts = Math.round(clamp(
+      stepM > 0 ? BEARING_LOOKAHEAD_TARGET_M / stepM : BEARING_LOOKAHEAD_MAX_PTS,
+      BEARING_LOOKAHEAD_MIN_PTS,
+      BEARING_LOOKAHEAD_MAX_PTS,
+    ))
+    const emaAlpha = clamp(BEARING_EMA_ALPHA_PER_M * stepM, BEARING_EMA_ALPHA_MIN, BEARING_EMA_ALPHA_MAX)
+
+    // Polilínea de progreso decimada: en vez de re-subir hasta 4000 vértices
+    // por frame, trabajamos sobre una traza reducida a ≤ MAX_PROGRESS_POINTS.
+    const decStep = Math.max(1, Math.ceil(coords.length / MAX_PROGRESS_POINTS))
+    const progressCoords = []
+    for (let i = 0; i < coords.length; i += decStep) progressCoords.push(coords[i])
+    if (progressCoords[progressCoords.length - 1] !== coords[coords.length - 1]) {
+      progressCoords.push(coords[coords.length - 1])
+    }
+    const progressCum = buildCumulative(progressCoords)
 
     // Desnivel acumulado (canónico) + regla 95% para ocultar la celda
     // que no aporta (ruta casi todo descenso → sin D+; casi todo ascenso
@@ -596,7 +650,7 @@
     let cursorSide = 'right'
 
     function bearingFromLookahead(idx) {
-      const ahead = Math.min(coords.length-1, idx + BEARING_LOOKAHEAD)
+      const ahead = Math.min(coords.length-1, idx + lookaheadPts)
       if (ahead <= idx) return smoothedBearing || 0
       let dx=0, dy=0
       for (let i=idx; i<ahead; i++) { dx += coords[i+1][0]-coords[i][0]; dy += coords[i+1][1]-coords[i][1] }
@@ -647,7 +701,7 @@
     // Bearing inicial del recorrido (donde apunta al km 0).
     // Pre-cálculo para sincronizar intro→route sin salto de cámara.
     const initialRouteBearing = (function() {
-      const ahead = Math.min(coords.length-1, BEARING_LOOKAHEAD)
+      const ahead = Math.min(coords.length-1, lookaheadPts)
       if (ahead <= 0) return 0
       let dx=0, dy=0
       for (let i=0; i<ahead; i++) { dx += coords[i+1][0]-coords[i][0]; dy += coords[i+1][1]-coords[i][1] }
@@ -697,7 +751,7 @@
         if (smoothedBearing == null) smoothedBearing = target
         else {
           const delta = shortestArcDelta(smoothedBearing, target)
-          const step = delta * BEARING_EMA_ALPHA
+          const step = delta * emaAlpha
           const cap = Math.sign(step) * Math.min(Math.abs(step), BEARING_MAX_DELTA)
           smoothedBearing = (smoothedBearing + cap + 360) % 360
         }
@@ -706,8 +760,9 @@
         // tierra (menos oclusión detrás de cerros), más cerca para agua.
         map.jumpTo({ center: here, zoom: ROUTE_PHASE_ZOOM, pitch: ROUTE_PHASE_PITCH, bearing: smoothedBearing })
 
-        // Update polyline progresiva
-        const seg = coords.slice(0, idx+1).map(c => [c[0], c[1]])
+        // Update polyline progresiva (traza decimada — O(≤1000) en vez de O(4000))
+        const pIdx = findIdxForKm(progressCum, km)
+        const seg = progressCoords.slice(0, pIdx+1).map(c => [c[0], c[1]])
         seg.push(here)
         map.getSource('route-progress').setData({ type:'Feature', geometry:{ type:'LineString', coordinates: seg }, properties:{} })
 
