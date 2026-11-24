@@ -46,6 +46,10 @@ export interface RouteData {
   // Dueño de la ruta (para watermark de atribución en redes sociales).
   // Si no hay avatar_url, el render skip-ea el watermark completamente.
   owner: OwnerData | null
+  // Perfil del relieve de interés cercano al trail (para que la cámara
+  // apunte al macizo en vez de solo al valle). Null si no hay relieve
+  // relevante (rutas cortas/planas) → cámara default.
+  focus_profile?: Array<{ km: number; bearing: number; dist_m: number; elev_m: number }> | null
 }
 
 export interface WaypointData {

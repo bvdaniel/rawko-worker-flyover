@@ -10,6 +10,7 @@ import 'dotenv/config'
 import { supabase } from './supabase.js'
 import { flyoverCursorEmoji } from './queue.js'
 import { renderFlyover } from './render.js'
+import { computeFocusProfile } from './terrain-focus.js'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { OwnerData, RouteData } from './types.js'
@@ -60,6 +61,8 @@ async function loadByTitle(title: string): Promise<RouteData | null> {
   // organizer_id de la experience (puede ser un guía distinto).
   const ownerId = (route as any).owner_id ?? (exp as any).organizer_id ?? null
   const owner = await fetchOwner(ownerId)
+  const gc = (route as any).route_geojson?.coordinates
+  const focus_profile = Array.isArray(gc) ? await computeFocusProfile(gc) : null
 
   return {
     route_id: route.id,
@@ -78,6 +81,7 @@ async function loadByTitle(title: string): Promise<RouteData | null> {
       owner?.gender ?? null,
     ),
     owner,
+    focus_profile,
     waypoints: (waypointRows ?? []).map((w: any) => ({
       id: w.id,
       kind: w.kind,
@@ -110,6 +114,8 @@ async function loadByRouteId(routeId: string): Promise<RouteData | null> {
     .order('taken_at', { ascending: true })
 
   const owner = await fetchOwner((r as any).owner_id ?? null)
+  const gc = (r as any).route_geojson?.coordinates
+  const focus_profile = Array.isArray(gc) ? await computeFocusProfile(gc) : null
 
   return {
     route_id: (r as any).id,
@@ -125,6 +131,7 @@ async function loadByRouteId(routeId: string): Promise<RouteData | null> {
     activity_family: (r as any).activity_family ?? null,
     emoji_override: flyoverCursorEmoji((r as any).activity_family ?? null, owner?.gender ?? null),
     owner,
+    focus_profile,
     waypoints: (waypointRows ?? []).map((w: any) => ({
       id: w.id,
       kind: w.kind,
@@ -149,10 +156,21 @@ if (!route) {
 const label = isUuid ? route.route_id.slice(0, 8) : route.title.replace(/\s+/g, '-')
 console.log(
   `[cli] ${route.title}: ${route.geojson.coordinates.length} coords, ${route.waypoints.length} waypoints, ` +
-  `owner=${route.owner?.full_name ?? 'sin dueño'}`,
+  `owner=${route.owner?.full_name ?? 'sin dueño'}, focus=${route.focus_profile?.length ?? 0} muestras`,
 )
 
-const result = await renderFlyover(route)
+// --frames=<inicio>-<fin> renderiza solo un tramo (preview rápido).
+const framesArg = process.argv.find(a => a.startsWith('--frames='))
+let renderOpts: { fromFrame?: number; toFrame?: number } = {}
+if (framesArg) {
+  const m = framesArg.slice('--frames='.length).split('-').map(Number)
+  if (m.length === 2 && isFinite(m[0]) && isFinite(m[1])) {
+    renderOpts = { fromFrame: m[0], toFrame: m[1] }
+    console.log(`[cli] preview: frames ${m[0]}-${m[1]} (${Math.round((m[1] - m[0]) / 30)}s)`)
+  }
+}
+
+const result = await renderFlyover(route, renderOpts)
 if (!result.success) {
   console.error(`[cli] FAIL: ${result.error}`)
   process.exit(1)

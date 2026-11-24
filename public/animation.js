@@ -115,6 +115,22 @@
   const ZOOM_MIN = 13
   const ZOOM_MAX = 14.6
 
+  // ── Cámara adaptativa al relieve (look-at del macizo) ─────────────
+  // Cuando la ruta circunda un macizo, el follow-cam rígido solo muestra
+  // el valle. Con un perfil de relieve (focus_profile) la cámara apunta
+  // hacia el terreno alto, se abre y baja el pitch según la distancia.
+  const CAMERA_BASE_M = 2600      // ancho mínimo (igual al default de 'pie')
+  const CAMERA_MAX_M = 18000      // ancho máximo con el relieve lejos
+  const FOCUS_WIDTH_K = 1.15      // m de ancho extra por cada m de distancia
+  const FOCUS_AIM_WEIGHT = 0.8    // cuánto gira la cámara hacia el relieve (0..1)
+  const FOCUS_ZOOM_MIN = 11.6     // zoom mínimo en modo relieve
+  const PITCH_MAX = 46            // pitch en tramo plano / sin relieve
+  const PITCH_MIN = 20            // pitch cuando el relieve está cerca
+  const FOCUS_EMA_ALPHA = 0.06    // suavizado del ancho/pitch
+  const FOCUS_PROMINENCE_M = 1200 // desnivel que satura la score (1.0)
+  const FOCUS_NEAR_M = 2000       // distancia bajo la cual no se penaliza
+  const FOCUS_FAR_M = 12000       // distancia a la que la score se apaga
+
   // Con más zoom la traza se ve proporcionalmente más fina; para `pie`
   // (que sube de 13 a ~14.5) engrosamos un poco la línea para que se lea.
   const LINE_SCALE_BY_FAMILY = {
@@ -222,6 +238,9 @@
             coords[idx-1][1] + (coords[idx][1]-coords[idx-1][1])*t]
   }
   function shortestArcDelta(from, to) { return ((to - from + 540) % 360) - 180 }
+  function blendBearing(from, to, w) {
+    return (from + shortestArcDelta(from, to) * w + 360) % 360
+  }
   function nearestPathIdx(coords, lon, lat) {
     let bi=0, bd=Infinity
     for (let i=0; i<coords.length; i++) {
@@ -380,6 +399,56 @@
     const ROUTE_PHASE_PITCH = IS_WATER ? 55 : 50
     const ROUTE_LINE_SCALE = LINE_SCALE_BY_FAMILY[ROUTE_FAMILY] ?? 1
 
+    // ── Cámara adaptativa al relieve (look-at del macizo) ──────────
+    // focus_profile viene del worker (calculado con el DEM). Cuando existe
+    // y el relieve es relevante, la cámara apunta hacia él, se abre y baja
+    // el pitch. Sin perfil (rutas cortas/planas) → cámara default intacta.
+    const focusProfile =
+      Array.isArray(route.focus_profile) && route.focus_profile.length >= 2
+        ? route.focus_profile
+        : null
+
+    const elevOf = (i) =>
+      typeof coords[i]?.[2] === 'number' && isFinite(coords[i][2]) ? coords[i][2] : 0
+
+    function zoomForWidth(width, minZoom) {
+      return Math.min(ZOOM_MAX, Math.max(minZoom,
+        Math.log2(M_PER_PX_AT_Z0 * Math.cos(centerLat * Math.PI / 180) * FRAME_W_PX / width)))
+    }
+    function focusWidth(dist) {
+      return clamp(CAMERA_BASE_M + FOCUS_WIDTH_K * dist, CAMERA_BASE_M, CAMERA_MAX_M)
+    }
+    function focusPitch(score) {
+      return PITCH_MAX + (PITCH_MIN - PITCH_MAX) * score
+    }
+    function scoreOf(focus, elevTrail) {
+      const prom = focus.elev_m - elevTrail
+      const d = clamp((focus.dist_m - FOCUS_NEAR_M) / FOCUS_FAR_M, 0, 1)
+      return clamp(prom / FOCUS_PROMINENCE_M, 0, 1) * (1 - 0.85 * d)
+    }
+    function focusAt(km) {
+      if (!focusProfile) return null
+      let lo = 0, hi = focusProfile.length - 1
+      while (lo < hi) { const m = (lo + hi) >> 1; focusProfile[m].km < km ? (lo = m + 1) : (hi = m) }
+      if (lo === 0) return focusProfile[0]
+      const a = focusProfile[lo - 1], b = focusProfile[lo]
+      const span = b.km - a.km
+      const t = span > 0 ? (km - a.km) / span : 0
+      return {
+        bearing: blendBearing(a.bearing, b.bearing, t),
+        dist_m: a.dist_m + (b.dist_m - a.dist_m) * t,
+        elev_m: a.elev_m + (b.elev_m - a.elev_m) * t,
+      }
+    }
+
+    // Zoom/pitch del fin del intro (primer punto de la ruta). En modo
+    // relieve usa el foco inicial; si no, los valores default.
+    const initFocus = focusAt(0)
+    const INTRO_ZOOM = initFocus
+      ? zoomForWidth(focusWidth(initFocus.dist_m), FOCUS_ZOOM_MIN)
+      : ROUTE_PHASE_ZOOM
+    const INTRO_PITCH = initFocus ? focusPitch(scoreOf(initFocus, elevOf(0))) : ROUTE_PHASE_PITCH
+
     // Formato "cinta de agua": para rutas de agua dibujamos el trazo
     // completo como una banda azul (el río) en vez de una línea blanca
     // fina. El progreso se dibuja encima como espuma/blanca. Así el agua
@@ -493,7 +562,23 @@
       url: `https://api.maptiler.com/tiles/terrain-rgb-v2/tiles.json?key=${maptilerKey}`,
       tileSize: 256,
     })
-    map.setTerrain({ source: 'flyover-terrain-rgb', exaggeration: 1.5 })
+    map.setTerrain({ source: 'flyover-terrain-rgb', exaggeration: 2.5 })
+
+    // Bruma atmosférica: en pitch bajo (relieve lejos) no hay cielo real,
+    // pero la niebla del horizonte da profundidad y color al fondo.
+    try {
+      map.setSky({
+        'sky-color': '#4a86c8',
+        'horizon-color': '#cfe0ef',
+        'fog-color': '#d9e7f2',
+        'horizon-fog-blend': 0.8,
+        'fog-ground-blend': 0.25,
+        'sky-horizon-blend': 0.5,
+        'atmosphere-blend': 0.8,
+      })
+    } catch (e) {
+      console.error('[anim] setSky failed', e?.message)
+    }
 
     // ====== Sources & layers para polyline + cursor + waypoint pin ======
     const flatCoords = coords.map(c => [c[0], c[1]])
@@ -633,7 +718,24 @@
     await new Promise(resolve => setTimeout(resolve, 500))
 
     // ====== Estado ======
-    let smoothedBearing = null
+    // Bearing inicial: rumbo del trail en km 0, mezclado con el foco si
+    // hay relieve → el intro aterriza sin salto de cámara al entrar al route.
+    const initialTrailBearing = (function() {
+      const ahead = Math.min(coords.length-1, lookaheadPts)
+      if (ahead <= 0) return 0
+      let dx=0, dy=0
+      for (let i=0; i<ahead; i++) { dx += coords[i+1][0]-coords[i][0]; dy += coords[i+1][1]-coords[i][1] }
+      return Math.atan2(dx, dy) * 180 / Math.PI
+    })()
+    const initFocusAt0 = focusAt(0)
+    const initScore = initFocusAt0 ? scoreOf(initFocusAt0, elevOf(0)) : 0
+    const initialBearing = initFocusAt0
+      ? blendBearing(initialTrailBearing, initFocusAt0.bearing, FOCUS_AIM_WEIGHT * initScore)
+      : initialTrailBearing
+
+    let smoothedBearing = initialBearing
+    let smoothedDist = initFocusAt0 ? initFocusAt0.dist_m : 0
+    let smoothedScore = initScore
     let cursorSide = 'right'
 
     function bearingFromLookahead(idx) {
@@ -685,16 +787,6 @@
       el.style.display = 'none'
     }
 
-    // Bearing inicial del recorrido (donde apunta al km 0).
-    // Pre-cálculo para sincronizar intro→route sin salto de cámara.
-    const initialRouteBearing = (function() {
-      const ahead = Math.min(coords.length-1, lookaheadPts)
-      if (ahead <= 0) return 0
-      let dx=0, dy=0
-      for (let i=0; i<ahead; i++) { dx += coords[i+1][0]-coords[i][0]; dy += coords[i+1][1]-coords[i][1] }
-      return Math.atan2(dx, dy) * 180 / Math.PI
-    })()
-
     function renderFrame(f) {
       let waypointMarkerCoord = null
       if (f < INTRO_END) {
@@ -709,9 +801,9 @@
             centerLon + (startLon - centerLon) * t,
             centerLat + (startLat - centerLat) * t,
           ],
-          zoom: 3.5 + (ROUTE_PHASE_ZOOM - 3.5) * t,
-          pitch: 0 + (ROUTE_PHASE_PITCH - 0) * t,
-          bearing: -30 + (initialRouteBearing - (-30)) * t,
+          zoom: 3.5 + (INTRO_ZOOM - 3.5) * t,
+          pitch: 0 + (INTRO_PITCH - 0) * t,
+          bearing: -30 + (initialBearing - (-30)) * t,
         })
         // Círculo de inicio de ruta: aparece cuando la cámara se asienta.
         const dot = document.getElementById('startDot')
@@ -734,18 +826,35 @@
         const idx = findIdxForKm(cumulative, km)
         const here = interpolate(coords, cumulative, idx, km)
 
-        const target = bearingFromLookahead(idx)
-        if (smoothedBearing == null) smoothedBearing = target
-        else {
-          const delta = shortestArcDelta(smoothedBearing, target)
-          const step = delta * emaAlpha
-          const cap = Math.sign(step) * Math.min(Math.abs(step), BEARING_MAX_DELTA)
-          smoothedBearing = (smoothedBearing + cap + 360) % 360
+        const trailBearing = bearingFromLookahead(idx)
+
+        // Cámara adaptativa al relieve: mezcla el rumbo hacia el macizo,
+        // abre el encuadre y baja el pitch según la score del foco.
+        let target = trailBearing
+        let curZoom = ROUTE_PHASE_ZOOM
+        let curPitch = ROUTE_PHASE_PITCH
+        if (focusProfile) {
+          const focus = focusAt(km)
+          if (focus) {
+            const score = scoreOf(focus, elevOf(idx))
+            smoothedScore += (score - smoothedScore) * FOCUS_EMA_ALPHA
+            smoothedDist += (focus.dist_m - smoothedDist) * FOCUS_EMA_ALPHA
+            target = blendBearing(trailBearing, focus.bearing, FOCUS_AIM_WEIGHT * smoothedScore)
+          } else {
+            smoothedScore += (0 - smoothedScore) * FOCUS_EMA_ALPHA
+          }
+          curZoom = zoomForWidth(focusWidth(smoothedDist), FOCUS_ZOOM_MIN)
+          curPitch = focusPitch(smoothedScore)
         }
 
-        // Zoom/pitch según familia de actividad. Cámara más alta para
-        // tierra (menos oclusión detrás de cerros), más cerca para agua.
-        map.jumpTo({ center: here, zoom: ROUTE_PHASE_ZOOM, pitch: ROUTE_PHASE_PITCH, bearing: smoothedBearing })
+        const delta = shortestArcDelta(smoothedBearing, target)
+        const step = delta * emaAlpha
+        const cap = Math.sign(step) * Math.min(Math.abs(step), BEARING_MAX_DELTA)
+        smoothedBearing = (smoothedBearing + cap + 360) % 360
+
+        // Zoom/pitch dinámicos: en modo relieve se abren/bajan; si no,
+        // los defaults por familia de actividad.
+        map.jumpTo({ center: here, zoom: curZoom, pitch: curPitch, bearing: smoothedBearing })
 
         // Update polyline progresiva. `idx` sale de la acumulada ORIGINAL
         // (la misma que mueve la cámara), así la línea termina exacto en el
@@ -807,8 +916,8 @@
         // a órbita (zoom 3.5, pitch 0) como bookend del intro.
         map.jumpTo({
           center: [centerLon, centerLat],
-          zoom: ROUTE_PHASE_ZOOM - (ROUTE_PHASE_ZOOM - 3.5) * t,
-          pitch: ROUTE_PHASE_PITCH - (ROUTE_PHASE_PITCH - 0) * t,
+          zoom: INTRO_ZOOM - (INTRO_ZOOM - 3.5) * t,
+          pitch: INTRO_PITCH - (INTRO_PITCH - 0) * t,
           bearing: 0,
         })
         map.getSource('route-progress').setData({ type:'Feature', geometry:{ type:'LineString', coordinates: flatCoords }, properties:{} })
@@ -833,17 +942,26 @@
       }
     }
 
-    // Exponer al worker
-    window.__totalFrames = TOTAL_FRAMES
+    // Exponer al worker.
+    // `frameRange = [from, to]` permite renderizar solo un tramo (previews):
+    // el worker pide frames locales 0..N y acá los mapeamos al rango global.
+    const frameRange = input.frameRange && Array.isArray(input.frameRange)
+      ? input.frameRange
+      : null
+    const baseFrame = frameRange ? Math.max(0, frameRange[0]) : 0
+    const endFrame = frameRange ? Math.min(TOTAL_FRAMES, frameRange[1]) : TOTAL_FRAMES
+    const totalRenderFrames = Math.max(1, endFrame - baseFrame)
+
+    window.__totalFrames = totalRenderFrames
     window.__renderFrame = async function(f) {
-      renderFrame(f)
+      renderFrame(baseFrame + f)
       // Esperar a que MapLibre quede idle (terrain + tiles ok)
       await Promise.race([
         new Promise(resolve => map.once('idle', resolve)),
         new Promise(resolve => setTimeout(resolve, 800)),
       ])
       await new Promise(resolve => requestAnimationFrame(() => resolve()))
-      if (f >= TOTAL_FRAMES - 1) window.__flyoverComplete = true
+      if (f >= totalRenderFrames - 1) window.__flyoverComplete = true
     }
     console.log('[anim] ready')
     window.__flyoverReady = true

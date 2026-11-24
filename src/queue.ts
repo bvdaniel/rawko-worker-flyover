@@ -1,5 +1,6 @@
 import { supabase } from './supabase.js'
 import type { FlyoverJob, OwnerData, RouteData } from './types.js'
+import { computeFocusProfile } from './terrain-focus.js'
 
 /**
  * Trae los datos públicos del dueño de la ruta para el watermark
@@ -163,6 +164,12 @@ export async function loadRouteData(job: FlyoverJob): Promise<RouteData | null> 
 
   const owner = await fetchOwner(ownerId)
 
+  // Perfil del relieve de interés (para apuntar la cámara al macizo).
+  const geojsonCoords = (route.route_geojson as any)?.coordinates
+  const focus_profile = Array.isArray(geojsonCoords)
+    ? await computeFocusProfile(geojsonCoords as [number, number, number?][])
+    : null
+
   return {
     route_id: route.id,
     experience_id: experience_id,
@@ -177,6 +184,7 @@ export async function loadRouteData(job: FlyoverJob): Promise<RouteData | null> 
     activity_family: activityFamily,
     emoji_override: flyoverCursorEmoji(activityFamily, owner?.gender ?? null),
     owner,
+    focus_profile,
     waypoints: (waypointRows ?? []).map((w: any) => ({
       id: w.id,
       kind: w.kind,

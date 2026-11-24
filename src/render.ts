@@ -134,7 +134,12 @@ function encodeMp4(framesDir: string, outputPath: string): Promise<void> {
   })
 }
 
-export async function renderFlyover(route: RouteData): Promise<RenderResult> {
+export interface RenderOptions {
+  fromFrame?: number
+  toFrame?: number
+}
+
+export async function renderFlyover(route: RouteData, opts: RenderOptions = {}): Promise<RenderResult> {
   const t0 = performance.now()
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'flyover-'))
   const framesDir = path.join(tmpRoot, 'frames')
@@ -201,7 +206,14 @@ export async function renderFlyover(route: RouteData): Promise<RenderResult> {
       (input: unknown) => {
         ;(globalThis as unknown as { __flyoverInput: unknown }).__flyoverInput = input
       },
-      { route, maptilerKey: MAPTILER_KEY },
+      {
+        route,
+        maptilerKey: MAPTILER_KEY,
+        frameRange:
+          opts.fromFrame != null && opts.toFrame != null
+            ? [opts.fromFrame, opts.toFrame]
+            : null,
+      },
     )
 
     const url = `http://127.0.0.1:${port}/flyover.html`
